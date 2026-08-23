@@ -597,7 +597,7 @@ for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
     end
 end
 
-print("[Anti Rejoin] System loaded. Toggle ON to block teleports/kicks.")
+print("Made by Diablo..")
 
 local WalkSpeedSpoof = getgenv().WalkSpeedSpoof
 if WalkSpeedSpoof then
