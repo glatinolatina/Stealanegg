@@ -409,6 +409,12 @@ speedToggleBtn.MouseButton1Click:Connect(function()
     SpeedEnabled = not SpeedEnabled
     updateToggleBtn(speedToggleBtn, setSpeedToggleState, SpeedEnabled)
     saveMemory()
+
+    if not SpeedEnabled and CurrentHumanoid then
+        pcall(function()
+            CurrentHumanoid.WalkSpeed = 16
+        end)
+    end
 end)
 
 local function startFly()
@@ -608,8 +614,8 @@ local CurrentHumanoid = nil
 local newindexhook
 local indexhook
 
-indexhook = hookmetamethod(game, "__index", function(self, index)
-    if not checkcaller() and typeof(self) == "Instance" then
+local function indexHookFunc(self, index)
+    if SpeedEnabled and not checkcaller() and typeof(self) == "Instance" then
         if self:IsA("Humanoid") and self:IsDescendantOf(lp.Character) then
             if type(index) == "string" then
                 local cleanindex = index:split("\0")[1]
@@ -621,26 +627,62 @@ indexhook = hookmetamethod(game, "__index", function(self, index)
         end
     end
     return indexhook(self, index)
-end)
+end
 
-newindexhook = hookmetamethod(game, "__newindex", function(self, index, newindex)
-    if not checkcaller() and typeof(self) == "Instance" then
+local function newIndexHookFunc(self, index, value)
+    if SpeedEnabled and not checkcaller() and typeof(self) == "Instance" then
         if self:IsA("Humanoid") and self:IsDescendantOf(lp.Character) then
             if type(index) == "string" then
                 local cleanindex = index:split("\0")[1]
                 if cleanindex == "WalkSpeed" then
                     CurrentHumanoid = cloneref(self)
-                    CurrentHumanoid.WalkSpeed = newindex
+                    CurrentHumanoid.WalkSpeed = value
                     return
                 end
             end
         end
     end
-    return newindexhook(self, index, newindex)
+    return newindexhook(self, index, value)
+end
+
+indexhook = hookmetamethod(game, "__index", indexHookFunc)
+newindexhook = hookmetamethod(game, "__newindex", newIndexHookFunc)
+
+local originalIndex = indexhook
+local originalNewIndex = newindexhook
+
+-- Reapply: periodically disable and re-enable spoofer hooks to stay undetected
+local function reapplySpoofer()
+    pcall(function()
+        hookmetamethod(game, "__index", originalIndex)
+        hookmetamethod(game, "__newindex", originalNewIndex)
+    end)
+    task.wait(0.05)
+    if SpeedEnabled then
+        pcall(function()
+            indexhook = hookmetamethod(game, "__index", indexHookFunc)
+            newindexhook = hookmetamethod(game, "__newindex", newIndexHookFunc)
+        end)
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if SpeedEnabled then
+            reapplySpoofer()
+        end
+    end
 end)
 
 getgenv().WalkSpeedSpoof = {
     Disable = newcclosure(function()
+        SpeedEnabled = false
+        if CurrentHumanoid then
+            pcall(function()
+                CurrentHumanoid.WalkSpeed = 16
+            end)
+        end
         hookmetamethod(game, "__index", indexhook)
         hookmetamethod(game, "__newindex", newindexhook)
         table.clear(getgenv().WalkSpeedSpoof)
