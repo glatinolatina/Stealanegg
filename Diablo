@@ -87,7 +87,7 @@ workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateS
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, 260, 0, 360)
-mainFrame.Position = UDim2.new(1, -280, 0, 20)
+mainFrame.Position = UDim2.new(0.5, -130, 0.5, -180)
 mainFrame.BackgroundColor3 = THEME.Background
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
@@ -101,7 +101,7 @@ local function updatePosition()
         mainFrame.Position = UDim2.new(0.5, -130, 0, 20)
         mainFrame.AnchorPoint = Vector2.new(0.5, 0)
     else
-        mainFrame.Position = UDim2.new(1, -280, 0, 20)
+        mainFrame.Position = UDim2.new(0.5, -130, 0.5, -180)
         mainFrame.AnchorPoint = Vector2.new(0, 0)
     end
 end
@@ -651,7 +651,6 @@ newindexhook = hookmetamethod(game, "__newindex", newIndexHookFunc)
 local originalIndex = indexhook
 local originalNewIndex = newindexhook
 
--- Reapply: periodically disable and re-enable spoofer hooks to stay undetected
 local function reapplySpoofer()
     pcall(function()
         hookmetamethod(game, "__index", originalIndex)
