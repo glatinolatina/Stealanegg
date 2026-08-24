@@ -1,36 +1,19 @@
-local _check_Players = game:GetService("Players")
-local _check_TweenService = game:GetService("TweenService")
-local _check_CoreGui = game:GetService("CoreGui")
-local _check_player = _check_Players.LocalPlayer
+local _chk_Players = game:GetService("Players")
+local _chk_TweenService = game:GetService("TweenService")
+local _chk_CoreGui = game:GetService("CoreGui")
+local _chk_player = _chk_Players.LocalPlayer
 
 local REQUIRED_FUNCS = {
-    "getgenv",
-    "hookmetamethod",
-    "getnamecallmethod",
-    "checkcaller",
-    "newcclosure",
-    "getgc",
-    "setmetatable",
+    { Name = "loadstring",      Test = function() return type(loadstring) == "function" end },
+    { Name = "game:HttpGet",    Test = function() return type(game.HttpGet) == "function" or pcall(function() game:HttpGet("https://example.com") end) end },
 }
 
 local missing = {}
-for _, name in ipairs(REQUIRED_FUNCS) do
-    local ok = pcall(function()
-        local f = loadstring("return " .. name)
-        if f then f() end
-    end)
+for _, item in ipairs(REQUIRED_FUNCS) do
+    local ok = pcall(item.Test)
     if not ok then
-        table.insert(missing, name)
+        table.insert(missing, item.Name)
     end
-end
-
-local debugOk = pcall(function()
-    local f = function() end
-    debug.getinfo(f, "n")
-    debug.getupvalues(f)
-end)
-if not debugOk then
-    table.insert(missing, "debug library")
 end
 
 local function showWarning(msg)
@@ -38,8 +21,8 @@ local function showWarning(msg)
     sg.Name = "ExecutorCompatWarning"
     sg.ResetOnSpawn = false
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    pcall(function() sg.Parent = _check_CoreGui end)
-    if not sg.Parent then sg.Parent = _check_player:WaitForChild("PlayerGui") end
+    pcall(function() sg.Parent = _chk_CoreGui end)
+    if not sg.Parent then sg.Parent = _chk_player:WaitForChild("PlayerGui") end
 
     local blur = Instance.new("Frame")
     blur.Size = UDim2.new(1, 0, 1, 0)
@@ -50,8 +33,8 @@ local function showWarning(msg)
     blur.Parent = sg
 
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(0, 320, 0, 140)
-    card.Position = UDim2.new(0.5, -160, 0.5, -70)
+    card.Size = UDim2.new(0, 340, 0, 160)
+    card.Position = UDim2.new(0.5, -170, 0.5, -80)
     card.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     card.BorderSizePixel = 0
     card.ZIndex = 101
@@ -64,28 +47,28 @@ local function showWarning(msg)
     stroke.Thickness = 2
 
     local icon = Instance.new("TextLabel", card)
-    icon.Size = UDim2.new(1, 0, 0, 36)
+    icon.Size = UDim2.new(1, 0, 0, 40)
     icon.Position = UDim2.new(0, 0, 0, 14)
     icon.BackgroundTransparency = 1
     icon.Text = "⚠️"
-    icon.TextSize = 28
+    icon.TextSize = 32
     icon.Font = Enum.Font.GothamBold
     icon.TextColor3 = Color3.fromRGB(255, 80, 80)
     icon.ZIndex = 102
 
     local title = Instance.new("TextLabel", card)
-    title.Size = UDim2.new(1, -24, 0, 22)
-    title.Position = UDim2.new(0, 12, 0, 52)
+    title.Size = UDim2.new(1, -24, 0, 24)
+    title.Position = UDim2.new(0, 12, 0, 56)
     title.BackgroundTransparency = 1
     title.Text = "Executor Not Supported"
-    title.TextSize = 16
+    title.TextSize = 17
     title.Font = Enum.Font.GothamBold
     title.TextColor3 = Color3.fromRGB(240, 240, 245)
     title.ZIndex = 102
 
     local body = Instance.new("TextLabel", card)
-    body.Size = UDim2.new(1, -24, 0, 40)
-    body.Position = UDim2.new(0, 12, 0, 78)
+    body.Size = UDim2.new(1, -24, 0, 50)
+    body.Position = UDim2.new(0, 12, 0, 84)
     body.BackgroundTransparency = 1
     body.Text = msg
     body.TextSize = 12
@@ -100,8 +83,8 @@ local function showSuccessPopup()
     sg.Name = "ExecutorCompatSuccess"
     sg.ResetOnSpawn = false
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    pcall(function() sg.Parent = _check_CoreGui end)
-    if not sg.Parent then sg.Parent = _check_player:WaitForChild("PlayerGui") end
+    pcall(function() sg.Parent = _chk_CoreGui end)
+    if not sg.Parent then sg.Parent = _chk_player:WaitForChild("PlayerGui") end
 
     local card = Instance.new("Frame")
     card.Size = UDim2.new(0, 260, 0, 44)
@@ -137,12 +120,12 @@ local function showSuccessPopup()
     lbl.TextColor3 = Color3.fromRGB(240, 240, 245)
     lbl.ZIndex = 102
 
-    _check_TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    _chk_TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Position = UDim2.new(0.5, -130, 0, 24)
     }):Play()
 
     task.delay(2.5, function()
-        local out = _check_TweenService:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        local out = _chk_TweenService:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Position = UDim2.new(0.5, -130, 0, -60)
         })
         out:Play()
@@ -152,17 +135,22 @@ local function showSuccessPopup()
 end
 
 if #missing > 0 then
-    showWarning("Your executor is missing required functions:\n" .. table.concat(missing, ", "))
+    showWarning("Your executor is missing required functions:\\n" .. table.concat(missing, ", ") .. "\\n\\nThis script requires a full Roblox executor.")
     return
 else
     showSuccessPopup()
 end
 
+local WindUI = loadstring(game:HttpGet(
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
+))()
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
 local Memory = getgenv().MergedUtilityMemory
@@ -189,393 +177,299 @@ local AntiRejoinEnabled = Memory.AntiRejoinEnabled or false
 local FlyEnabled = Memory.FlyEnabled or false
 local FlySpeed = Memory.FlySpeed or 50
 
-local THEME = {
-    Background    = Color3.fromRGB(18, 18, 22),
-    Surface       = Color3.fromRGB(28, 28, 34),
-    SurfaceHover  = Color3.fromRGB(36, 36, 44),
-    Border        = Color3.fromRGB(45, 45, 55),
-    Text          = Color3.fromRGB(240, 240, 245),
-    TextDim       = Color3.fromRGB(150, 150, 165),
-    Accent        = Color3.fromRGB(120, 170, 255),
-    AccentGlow    = Color3.fromRGB(180, 210, 255),
-    Success       = Color3.fromRGB(80, 220, 120),
-    Danger        = Color3.fromRGB(255, 90, 90),
-    DangerBg      = Color3.fromRGB(50, 25, 25),
-    SuccessBg     = Color3.fromRGB(25, 50, 30),
-}
-
-local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TWEEN_SMOOTH = TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-
-local function tween(inst, props, info)
-    TweenService:Create(inst, info or TWEEN_FAST, props):Play()
-end
-
 local FlyBodyVelocity = nil
 local FlyBodyGyro = nil
 local FlyConnection = nil
+local CurrentHumanoid = nil
+local ragdollConnection = nil
+local joints = {}
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "MergedUtilityUI"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local DEFAULT_THEME = "Willow Rose"
 
-pcall(function()
-    screenGui.Parent = CoreGui
-end)
-if not screenGui.Parent then
-    screenGui.Parent = player:WaitForChild("PlayerGui")
-end
-
-local uiScale = Instance.new("UIScale")
-uiScale.Parent = screenGui
-
-local function updateScale()
-    local screenSize = workspace.CurrentCamera.ViewportSize
-    local minDim = math.min(screenSize.X, screenSize.Y)
-    if minDim < 600 then
-        uiScale.Scale = 0.75
-    elseif minDim < 900 then
-        uiScale.Scale = 0.9
-    else
-        uiScale.Scale = 1.0
-    end
-end
-updateScale()
-workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
-
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 260, 0, 360)
-mainFrame.Position = UDim2.new(0.5, -130, 0.5, -180)
-mainFrame.BackgroundColor3 = THEME.Background
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.ClipsDescendants = true
-mainFrame.Parent = screenGui
-
-local function updatePosition()
-    local screenSize = workspace.CurrentCamera.ViewportSize
-    if screenSize.X < 700 then
-        mainFrame.Position = UDim2.new(0.5, -130, 0, 20)
-        mainFrame.AnchorPoint = Vector2.new(0.5, 0)
-    else
-        mainFrame.Position = UDim2.new(0.5, -130, 0.5, -180)
-        mainFrame.AnchorPoint = Vector2.new(0, 0)
-    end
-end
-updatePosition()
-workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updatePosition)
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 14)
-corner.Parent = mainFrame
-
-local shineStroke = Instance.new("UIStroke")
-shineStroke.Color = THEME.Border
-shineStroke.Thickness = 1.8
-shineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-shineStroke.Parent = mainFrame
-
-local shineGradient = Instance.new("UIGradient")
-shineGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0.00, THEME.Accent),
-    ColorSequenceKeypoint.new(0.35, THEME.Border),
-    ColorSequenceKeypoint.new(0.50, THEME.AccentGlow),
-    ColorSequenceKeypoint.new(0.65, THEME.Border),
-    ColorSequenceKeypoint.new(1.00, THEME.Accent),
-})
-shineGradient.Transparency = NumberSequence.new({
-    NumberSequenceKeypoint.new(0.00, 0.25),
-    NumberSequenceKeypoint.new(0.35, 1.0),
-    NumberSequenceKeypoint.new(0.50, 0.0),
-    NumberSequenceKeypoint.new(0.65, 1.0),
-    NumberSequenceKeypoint.new(1.00, 0.25),
-})
-shineGradient.Parent = shineStroke
-
-local glowT = 0
-RunService.RenderStepped:Connect(function(dt)
-    if not mainFrame or not mainFrame.Parent then return end
-    glowT = (glowT + dt * 0.4) % 1
-    shineGradient.Offset = Vector2.new(glowT * 2 - 1, 0)
-end)
-
-local innerGradient = Instance.new("UIGradient")
-innerGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, THEME.Background),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(24, 24, 32)),
-})
-innerGradient.Rotation = 90
-innerGradient.Parent = mainFrame
-
-local topBar = Instance.new("Frame")
-topBar.Name = "TopBar"
-topBar.Size = UDim2.new(1, -28, 0, 1)
-topBar.Position = UDim2.new(0, 14, 0, 38)
-topBar.BackgroundColor3 = THEME.Border
-topBar.BorderSizePixel = 0
-local topBarGrad = Instance.new("UIGradient")
-topBarGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, THEME.Accent),
-    ColorSequenceKeypoint.new(0.5, THEME.Border),
-    ColorSequenceKeypoint.new(1, THEME.Accent),
-})
-topBarGrad.Parent = topBar
-topBar.Parent = mainFrame
-
-local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Size = UDim2.new(1, 0, 0, 36)
-title.Position = UDim2.new(0, 0, 0, 6)
-title.BackgroundTransparency = 1
-title.Text = "Diablo"
-title.TextColor3 = THEME.Text
-title.TextSize = 15
-title.Font = Enum.Font.GothamBold
-title.Parent = mainFrame
-
-local function createToggleSwitch(parent, initialState)
-    local track = Instance.new("TextButton")
-    track.Size = UDim2.new(0, 48, 0, 26)
-    track.AnchorPoint = Vector2.new(1, 0.5)
-    track.Position = UDim2.new(1, -12, 0.5, 0)
-    track.BackgroundColor3 = initialState and THEME.Success or Color3.fromRGB(55, 55, 65)
-    track.BorderSizePixel = 0
-    track.Text = ""
-    track.AutoButtonColor = false
-    track.Parent = parent
-
-    local trackCorner = Instance.new("UICorner")
-    trackCorner.CornerRadius = UDim.new(1, 0)
-    trackCorner.Parent = track
-
-    local thumb = Instance.new("Frame")
-    thumb.Size = UDim2.new(0, 20, 0, 20)
-    thumb.Position = initialState and UDim2.new(1, -23, 0.5, -10) or UDim2.new(0, 3, 0.5, -10)
-    thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    thumb.BorderSizePixel = 0
-    thumb.Parent = track
-
-    local thumbCorner = Instance.new("UICorner")
-    thumbCorner.CornerRadius = UDim.new(1, 0)
-    thumbCorner.Parent = thumb
-
-    local thumbShadow = Instance.new("UIStroke")
-    thumbShadow.Color = Color3.fromRGB(0, 0, 0)
-    thumbShadow.Transparency = 0.7
-    thumbShadow.Thickness = 1
-    thumbShadow.Parent = thumb
-
-    local state = initialState
-
-    local function updateToggle(animated)
-        local info = animated and TWEEN_SMOOTH or TWEEN_FAST
-        if state then
-            tween(track, { BackgroundColor3 = THEME.Success }, info)
-            tween(thumb, { Position = UDim2.new(1, -23, 0.5, -10) }, info)
+local function Gradient(colors, rotation)
+    local points = {}
+    for position, color in pairs(colors) do
+        if type(color) == "table" then
+            points[position] = {
+                Color = Color3.fromHex(color.Color),
+                Transparency = color.Transparency or 0,
+            }
         else
-            tween(track, { BackgroundColor3 = Color3.fromRGB(55, 55, 65) }, info)
-            tween(thumb, { Position = UDim2.new(0, 3, 0.5, -10) }, info)
+            points[position] = {
+                Color = Color3.fromHex(color),
+                Transparency = 0,
+            }
         end
     end
+    return WindUI:Gradient(points, { Rotation = rotation or 45 })
+end
 
-    track.MouseEnter:Connect(function()
-        if state then
-            tween(track, { BackgroundColor3 = Color3.fromRGB(100, 230, 140) }, TWEEN_FAST)
-        else
-            tween(track, { BackgroundColor3 = Color3.fromRGB(70, 70, 80) }, TWEEN_FAST)
+WindUI:AddTheme({
+    Name = DEFAULT_THEME,
+    Accent = Gradient({ ["0"] = "#711E42", ["50"] = "#E45B91", ["100"] = "#711E42" }, 45),
+    Background = Gradient({
+        ["0"] = { Color = "#0B0408", Transparency = 0.06 },
+        ["25"] = { Color = "#190812", Transparency = 0.08 },
+        ["50"] = { Color = "#351126", Transparency = 0.10 },
+        ["75"] = { Color = "#711E42", Transparency = 0.13 },
+        ["100"] = { Color = "#0B0408", Transparency = 0.06 },
+    }, 135),
+    Outline = Gradient({
+        ["0"] = { Color = "#4B1730", Transparency = 0.45 },
+        ["50"] = { Color = "#D14F85", Transparency = 0.22 },
+        ["100"] = { Color = "#5A1C39", Transparency = 0.42 },
+    }, 90),
+    Button = Gradient({
+        ["0"] = { Color = "#2A0C1C", Transparency = 0.72 },
+        ["50"] = { Color = "#7E2850", Transparency = 0.61 },
+        ["100"] = { Color = "#2A0C1C", Transparency = 0.74 },
+    }, 90),
+    Text = Color3.fromHex("#FFFFFF"),
+    Placeholder = Color3.fromHex("#B8A0A8"),
+    Icon = Color3.fromHex("#FFFFFF"),
+})
+
+WindUI:SetTheme(DEFAULT_THEME)
+
+local Window = WindUI:CreateWindow({
+    Title = "Diablo",
+    Icon = "rbxthumb://type=Asset&id=108210086503555&w=150&h=150",
+    Author = "made by Diablo",
+    Folder = "DiabloHub",
+    Size = UDim2.fromOffset(520, 420),
+    MinSize = Vector2.new(420, 320),
+    ToggleKey = Enum.KeyCode.K,
+    Transparent = true,
+    Theme = DEFAULT_THEME,
+    Resizable = true,
+    SideBarWidth = 160,
+    HideSearchBar = true,
+    ScrollBarEnabled = true,
+    Background = "rbxthumb://type=Asset&id=108210086503555&w=150&h=150",
+    BackgroundImageTransparency = 0.7,
+    ShadowTransparency = 0.22,
+    Radius = 14,
+    ElementsRadius = 10,
+    Acrylic = true,
+    NewElements = true,
+    HidePanelBackground = true,
+    Topbar = { Height = 44, ButtonsType = "Mac" },
+    OpenButton = {
+        Title = "Open Diablo",
+        Icon = "rbxthumb://type=Asset&id=108210086503555&w=150&h=150",
+        CornerRadius = UDim.new(1, 0),
+        StrokeThickness = 1,
+        Draggable = true,
+        Enabled = true,
+        OnlyMobile = false,
+        Scale = 0.92,
+        Color = ColorSequence.new(Color3.fromHex("#711E42"), Color3.fromHex("#E45B91")),
+    },
+    User = {
+        Enabled = true,
+        Anonymous = false,
+        Image = "rbxthumb://type=Asset&id=108210086503555&w=150&h=150",
+        Callback = function()
+            WindUI:Notify({
+                Title = "Diablo",
+                Content = player.Name,
+                Icon = "user",
+                Duration = 3,
+            })
+        end,
+    },
+})
+
+Window:SetBackgroundTransparency(0.5)
+
+local MainTab = Window:Tab({ Title = "Main", Icon = "layout-dashboard" })
+local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
+
+MainTab:Section({ Title = "Movement", Icon = "move", Opened = true })
+
+local SpeedInput = MainTab:Input({
+    Title = "Walk Speed",
+    Desc = "Set your desired movement speed.",
+    InputIcon = "gauge",
+    Value = tostring(DesiredSpeed),
+    Placeholder = "16",
+    Callback = function(value)
+        local num = tonumber(value)
+        if num then
+            DesiredSpeed = num
+            Memory.DesiredSpeed = num
+            if SpeedEnabled and CurrentHumanoid then
+                pcall(function() CurrentHumanoid.WalkSpeed = DesiredSpeed end)
+            end
         end
-    end)
-    track.MouseLeave:Connect(function()
-        updateToggle(true)
-    end)
+    end,
+})
 
-    return track, function(newState)
-        state = newState
-        updateToggle(true)
-    end, function() return state end
-end
+local SpeedToggle = MainTab:Toggle({
+    Title = "Speed Hack",
+    Desc = "Enable custom walk speed.",
+    Icon = "zap",
+    Type = "Toggle",
+    Value = SpeedEnabled,
+    Callback = function(value)
+        SpeedEnabled = value
+        Memory.SpeedEnabled = value
+        if not SpeedEnabled and CurrentHumanoid then
+            pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
+        end
+    end,
+})
 
-local function createToggleRow(parent, yPos, labelText, initialState)
-    local row = Instance.new("Frame")
-    row.Name = labelText:gsub(" ", "") .. "Row"
-    row.Size = UDim2.new(1, -28, 0, 38)
-    row.Position = UDim2.new(0, 14, 0, yPos)
-    row.BackgroundColor3 = THEME.Surface
-    row.BorderSizePixel = 0
-    row.Parent = parent
+local FlyInput = MainTab:Input({
+    Title = "Fly Speed",
+    Desc = "Set your flight speed.",
+    InputIcon = "plane",
+    Value = tostring(FlySpeed),
+    Placeholder = "50",
+    Callback = function(value)
+        local num = tonumber(value)
+        if num then
+            FlySpeed = num
+            Memory.FlySpeed = num
+        end
+    end,
+})
 
-    local rowCorner = Instance.new("UICorner")
-    rowCorner.CornerRadius = UDim.new(0, 10)
-    rowCorner.Parent = row
+local FlyToggle = MainTab:Toggle({
+    Title = "Fly",
+    Desc = "Enable noclip flight.",
+    Icon = "plane",
+    Type = "Toggle",
+    Value = FlyEnabled,
+    Callback = function(value)
+        FlyEnabled = value
+        Memory.FlyEnabled = value
+        if FlyEnabled then
+            startFly()
+        else
+            stopFly()
+        end
+    end,
+})
 
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -80, 1, 0)
-    lbl.Position = UDim2.new(0, 14, 0, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
-    lbl.TextColor3 = THEME.Text
-    lbl.TextSize = 13
-    lbl.Font = Enum.Font.GothamMedium
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = row
+MainTab:Divider()
 
-    local toggleBtn, setState, getState = createToggleSwitch(row, initialState)
+MainTab:Section({ Title = "Combat / Physics", Icon = "shield", Opened = true })
 
-    return row, toggleBtn, setState, getState
-end
+local AntiKnockbackToggle = MainTab:Toggle({
+    Title = "Anti Knockback",
+    Desc = "Prevents being pushed around by physics.",
+    Icon = "anchor",
+    Type = "Toggle",
+    Value = AntiKnockbackEnabled,
+    Callback = function(value)
+        AntiKnockbackEnabled = value
+        Memory.AntiKnockbackEnabled = value
+    end,
+})
 
-local function createInputRow(parent, yPos, labelText, defaultValue)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -28, 0, 30)
-    row.Position = UDim2.new(0, 14, 0, yPos)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
+local AntiRagdollToggle = MainTab:Toggle({
+    Title = "Anti Ragdoll",
+    Desc = "Prevents ragdoll / fling states.",
+    Icon = "user-x",
+    Type = "Toggle",
+    Value = AntiRagdollEnabled,
+    Callback = function(value)
+        AntiRagdollEnabled = value
+        Memory.AntiRagdollEnabled = value
+    end,
+})
 
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(0, 70, 1, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
-    lbl.TextColor3 = THEME.TextDim
-    lbl.TextSize = 12
-    lbl.Font = Enum.Font.GothamMedium
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = row
+local InstantAccelToggle = MainTab:Toggle({
+    Title = "Instant Acceleration",
+    Desc = "Instantly reach max velocity when moving.",
+    Icon = "fast-forward",
+    Type = "Toggle",
+    Value = InstantAccelerationEnabled,
+    Callback = function(value)
+        InstantAccelerationEnabled = value
+        Memory.InstantAccelerationEnabled = value
+    end,
+})
 
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0, 70, 0, 24)
-    box.Position = UDim2.new(0, 74, 0, 3)
-    box.BackgroundColor3 = THEME.Surface
-    box.BorderSizePixel = 0
-    box.Text = tostring(defaultValue)
-    box.TextColor3 = THEME.Text
-    box.TextSize = 12
-    box.Font = Enum.Font.Gotham
-    box.ClearTextOnFocus = false
-    box.Parent = row
+local AntiRejoinToggle = MainTab:Toggle({
+    Title = "Anti Rejoin / Kick",
+    Desc = "Blocks Kick and Teleport attempts.",
+    Icon = "ban",
+    Type = "Toggle",
+    Value = AntiRejoinEnabled,
+    Callback = function(value)
+        AntiRejoinEnabled = value
+        Memory.AntiRejoinEnabled = value
+    end,
+})
 
-    local boxCorner = Instance.new("UICorner")
-    boxCorner.CornerRadius = UDim.new(0, 6)
-    boxCorner.Parent = box
+MainTab:Divider()
 
-    local boxStroke = Instance.new("UIStroke")
-    boxStroke.Color = THEME.Border
-    boxStroke.Thickness = 1
-    boxStroke.Parent = box
+MainTab:Paragraph({
+    Title = "Diablo Utility",
+    Desc = "Drag the window to move. Settings auto-save across sessions.",
+    Icon = "info",
+})
 
-    box.Focused:Connect(function()
-        tween(boxStroke, { Color = THEME.Accent }, TWEEN_FAST)
-    end)
-    box.FocusLost:Connect(function()
-        tween(boxStroke, { Color = THEME.Border }, TWEEN_FAST)
-    end)
+MainTab:Divider()
 
-    return row, box
-end
+MainTab:Section({ Title = "Avatar", Icon = "user", Opened = true })
 
-local function createSectionHeader(parent, yPos, text)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -28, 0, 16)
-    row.Position = UDim2.new(0, 14, 0, yPos)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
-
-    local tick = Instance.new("Frame")
-    tick.Size = UDim2.new(0, 3, 0, 10)
-    tick.Position = UDim2.new(0, 0, 0, 3)
-    tick.BackgroundColor3 = THEME.Accent
-    tick.BorderSizePixel = 0
-    local tc = Instance.new("UICorner")
-    tc.CornerRadius = UDim.new(0, 2)
-    tc.Parent = tick
-    tick.Parent = row
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -8, 1, 0)
-    lbl.Position = UDim2.new(0, 8, 0, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = string.upper(text)
-    lbl.TextColor3 = THEME.TextDim
-    lbl.TextSize = 9
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = row
-end
-
-local currentY = 52
-
-createSectionHeader(mainFrame, currentY, "Movement")
-currentY = currentY + 20
-
-local speedRow, speedBox = createInputRow(mainFrame, currentY, "Speed:", DesiredSpeed)
-currentY = currentY + 36
-
-local speedToggleBtn, setSpeedToggleState = createToggleSwitch(speedRow, SpeedEnabled)
-
-local flyRow, flyBox = createInputRow(mainFrame, currentY, "Fly:", FlySpeed)
-currentY = currentY + 36
-
-local flyToggleBtn, setFlyToggleState = createToggleSwitch(flyRow, FlyEnabled)
-
-currentY = currentY + 10
-createSectionHeader(mainFrame, currentY, "Combat / Physics")
-currentY = currentY + 20
-
-local akRow, akToggle, setAkState, getAkState = createToggleRow(mainFrame, currentY, "Anti Knockback", AntiKnockbackEnabled)
-currentY = currentY + 40
-
-local arRow, arToggle, setArState, getArState = createToggleRow(mainFrame, currentY, "Anti Ragdoll", AntiRagdollEnabled)
-currentY = currentY + 40
-
-local iaRow, iaToggle, setIaState, getIaState = createToggleRow(mainFrame, currentY, "Instant Accel", InstantAccelerationEnabled)
-currentY = currentY + 40
-
-local arjRow, arjToggle, setArjState, getArjState = createToggleRow(mainFrame, currentY, "Anti Rejoin", AntiRejoinEnabled)
-currentY = currentY + 40
-
-local hint = Instance.new("TextLabel")
-hint.Name = "Hint"
-hint.Size = UDim2.new(1, 0, 0, 16)
-hint.Position = UDim2.new(0, 0, 0, currentY + 4)
-hint.BackgroundTransparency = 1
-hint.Text = "Drag to move  •  Auto-saves settings"
-hint.TextColor3 = Color3.fromRGB(80, 80, 95)
-hint.TextSize = 9
-hint.Font = Enum.Font.Gotham
-hint.Parent = mainFrame
-
-local function updateToggleBtn(btn, setStateFunc, state)
-    if setStateFunc then
-        setStateFunc(state)
-    end
-end
-
-local function saveMemory()
-    Memory.SpeedEnabled = SpeedEnabled
-    Memory.DesiredSpeed = DesiredSpeed
-    Memory.AntiKnockbackEnabled = AntiKnockbackEnabled
-    Memory.AntiRagdollEnabled = AntiRagdollEnabled
-    Memory.InstantAccelerationEnabled = InstantAccelerationEnabled
-    Memory.AntiRejoinEnabled = AntiRejoinEnabled
-    Memory.FlyEnabled = FlyEnabled
-    Memory.FlySpeed = FlySpeed
-end
-
-speedToggleBtn.MouseButton1Click:Connect(function()
-    local num = tonumber(speedBox.Text)
-    if num then DesiredSpeed = num end
-    SpeedEnabled = not SpeedEnabled
-    updateToggleBtn(speedToggleBtn, setSpeedToggleState, SpeedEnabled)
-    saveMemory()
-
-    if not SpeedEnabled and CurrentHumanoid then
-        pcall(function()
-            CurrentHumanoid.WalkSpeed = 16
+MainTab:Button({
+    Title = "R6",
+    Desc = "Execute R6 avatar script.",
+    Icon = "person-standing",
+    Callback = function()
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Methions/Thingsomething/refs/heads/main/R6"))()
         end)
-    end
-end)
+        if not success then
+            warn("[R6] Failed to execute: " .. tostring(err))
+        end
+    end,
+})
+
+SettingsTab:Section({ Title = "Window", Icon = "panel-top", Opened = true })
+
+SettingsTab:Button({
+    Title = "Open Window",
+    Desc = "Open Diablo immediately.",
+    Icon = "panel-top-open",
+    Callback = function()
+        Window:Open()
+    end,
+})
+
+SettingsTab:Button({
+    Title = "Close Window",
+    Desc = "Close Diablo UI.",
+    Icon = "x",
+    Callback = function()
+        Window:Close()
+    end,
+})
+
+SettingsTab:Keybind({
+    Title = "UI Keybind",
+    Desc = "Key to open/close the Diablo UI.",
+    Icon = "keyboard",
+    Value = "K",
+    CanChange = true,
+    Callback = function(key)
+        Window:SetToggleKey(Enum.KeyCode[key])
+    end,
+})
+
+SettingsTab:Divider()
+
+SettingsTab:Section({ Title = "About", Icon = "info", Opened = true })
+
+SettingsTab:Paragraph({
+    Title = "Diablo",
+    Desc = "A clean utility hub built with WindUI.\\nMade by Diablo.",
+    Icon = "zap",
+})
 
 local function startFly()
     if FlyConnection then
@@ -661,69 +555,6 @@ local function stopFly()
     end
 end
 
-flyToggleBtn.MouseButton1Click:Connect(function()
-    local num = tonumber(flyBox.Text)
-    if num then FlySpeed = num end
-    FlyEnabled = not FlyEnabled
-    updateToggleBtn(flyToggleBtn, setFlyToggleState, FlyEnabled)
-    saveMemory()
-    if FlyEnabled then
-        startFly()
-    else
-        stopFly()
-    end
-end)
-
-akToggle.MouseButton1Click:Connect(function()
-    AntiKnockbackEnabled = not AntiKnockbackEnabled
-    updateToggleBtn(akToggle, setAkState, AntiKnockbackEnabled)
-    saveMemory()
-end)
-
-arToggle.MouseButton1Click:Connect(function()
-    AntiRagdollEnabled = not AntiRagdollEnabled
-    updateToggleBtn(arToggle, setArState, AntiRagdollEnabled)
-    saveMemory()
-end)
-
-iaToggle.MouseButton1Click:Connect(function()
-    InstantAccelerationEnabled = not InstantAccelerationEnabled
-    updateToggleBtn(iaToggle, setIaState, InstantAccelerationEnabled)
-    saveMemory()
-end)
-
-arjToggle.MouseButton1Click:Connect(function()
-    AntiRejoinEnabled = not AntiRejoinEnabled
-    updateToggleBtn(arjToggle, setArjState, AntiRejoinEnabled)
-    saveMemory()
-end)
-
-speedBox.FocusLost:Connect(function()
-    local num = tonumber(speedBox.Text)
-    if not num then
-        speedBox.Text = tostring(DesiredSpeed)
-    else
-        DesiredSpeed = num
-        if SpeedEnabled and CurrentHumanoid then
-            CurrentHumanoid.WalkSpeed = DesiredSpeed
-        end
-        saveMemory()
-    end
-end)
-
-flyBox.FocusLost:Connect(function()
-    local num = tonumber(flyBox.Text)
-    if not num then
-        flyBox.Text = tostring(FlySpeed)
-    else
-        FlySpeed = num
-        saveMemory()
-    end
-end)
-
-local TeleportService = game:GetService("TeleportService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local kickHook
 kickHook = hookmetamethod(game, "__namecall", function(self, ...)
     if AntiRejoinEnabled and not checkcaller() then
@@ -757,19 +588,13 @@ for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
     end
 end
 
-print("Made by Diablo..")
-
 local WalkSpeedSpoof = getgenv().WalkSpeedSpoof
 if WalkSpeedSpoof then
     WalkSpeedSpoof.Disable()
 end
 
-local cloneref = cloneref or function(...)
-    return ...
-end
-
+local cloneref = cloneref or function(...) return ... end
 local lp = cloneref(game:GetService("Players").LocalPlayer)
-local CurrentHumanoid = nil
 
 local newindexhook
 local indexhook
@@ -816,7 +641,7 @@ local function reapplySpoofer()
         hookmetamethod(game, "__index", originalIndex)
         hookmetamethod(game, "__newindex", originalNewIndex)
     end)
-    task.wait(0.05)
+    task.wait()
     if SpeedEnabled then
         pcall(function()
             indexhook = hookmetamethod(game, "__index", indexHookFunc)
@@ -838,17 +663,13 @@ getgenv().WalkSpeedSpoof = {
     Disable = newcclosure(function()
         SpeedEnabled = false
         if CurrentHumanoid then
-            pcall(function()
-                CurrentHumanoid.WalkSpeed = 16
-            end)
+            pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
         end
         hookmetamethod(game, "__index", indexhook)
         hookmetamethod(game, "__newindex", newindexhook)
         table.clear(getgenv().WalkSpeedSpoof)
     end)
 }
-
-local joints = {}
 
 local function storeJoints(character)
     joints = {}
@@ -885,8 +706,6 @@ local function restoreJoints(character)
         end
     end
 end
-
-local ragdollConnection = nil
 
 local function startAntiRagdoll(character)
     local humanoid = character:WaitForChild("Humanoid")
@@ -939,9 +758,7 @@ RunService.Heartbeat:Connect(function()
             end
         end
         if CurrentHumanoid then
-            pcall(function()
-                CurrentHumanoid.WalkSpeed = DesiredSpeed
-            end)
+            pcall(function() CurrentHumanoid.WalkSpeed = DesiredSpeed end)
         end
         if InstantAccelerationEnabled then
             local char = player.Character
@@ -989,15 +806,12 @@ for _, func in next, getgc() do
         for _, upvalue in pairs(debug.getupvalues(func)) do
             if typeof(upvalue) == "table" then
                 setmetatable(upvalue, {
-                    __index = function()
-                        print("index1")
-                    end,
-                    __newindex = function()
-                        print("index2")
-                    end
+                    __index = function() print("index1") end,
+                    __newindex = function() print("index2") end
                 })
             end
         end
     end
 end
-print("Success")
+
+print("Diablo loaded successfully.")
