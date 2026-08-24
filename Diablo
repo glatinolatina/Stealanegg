@@ -814,4 +814,168 @@ for _, func in next, getgc() do
     end
 end
 
+local DiabloUserBillboards = {}
+local DiabloUsersFolder = nil
+
+pcall(function()
+    DiabloUsersFolder = ReplicatedStorage:FindFirstChild("DiabloUsers")
+    if not DiabloUsersFolder then
+        DiabloUsersFolder = Instance.new("Folder")
+        DiabloUsersFolder.Name = "DiabloUsers"
+        DiabloUsersFolder.Parent = ReplicatedStorage
+    end
+end)
+
+if DiabloUsersFolder then
+    local function attachBillboardToHead(targetPlayer, billboard)
+        if not targetPlayer.Character then return false end
+        local head = targetPlayer.Character:FindFirstChild("Head")
+        if head then
+            billboard.Parent = head
+            return true
+        end
+        return false
+    end
+
+    local function createDiabloBillboard(targetPlayer)
+        if targetPlayer == player then return end
+        if DiabloUserBillboards[targetPlayer] then return end
+        if not targetPlayer:IsDescendantOf(game) then return end
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "DiabloUserIndicator"
+        billboard.AlwaysOnTop = true
+        billboard.Size = UDim2.new(0, 150, 0, 42)
+        billboard.StudsOffset = Vector3.new(0, 3.4, 0)
+        billboard.LightInfluence = 0
+        billboard.MaxDistance = 200
+        billboard.ResetOnSpawn = false
+
+        local bg = Instance.new("Frame")
+        bg.Name = "Bg"
+        bg.Size = UDim2.new(1, 0, 1, 0)
+        bg.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+        bg.BackgroundTransparency = 0.12
+        bg.BorderSizePixel = 0
+        bg.Parent = billboard
+        Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 10)
+
+        local stroke = Instance.new("UIStroke", bg)
+        stroke.Color = Color3.fromRGB(228, 91, 145)
+        stroke.Thickness = 1.8
+
+        local icon = Instance.new("TextLabel")
+        icon.Name = "Icon"
+        icon.Size = UDim2.new(0, 26, 1, 0)
+        icon.Position = UDim2.new(0, 8, 0, 0)
+        icon.BackgroundTransparency = 1
+        icon.Text = "🔥"
+        icon.TextSize = 17
+        icon.Font = Enum.Font.GothamBold
+        icon.TextColor3 = Color3.fromRGB(228, 91, 145)
+        icon.Parent = bg
+
+        local txt = Instance.new("TextLabel")
+        txt.Name = "Text"
+        txt.Size = UDim2.new(1, -40, 1, 0)
+        txt.Position = UDim2.new(0, 32, 0, 0)
+        txt.BackgroundTransparency = 1
+        txt.Text = "Diablo User"
+        txt.TextSize = 14
+        txt.Font = Enum.Font.GothamBold
+        txt.TextColor3 = Color3.fromRGB(240, 240, 245)
+        txt.Parent = bg
+
+        DiabloUserBillboards[targetPlayer] = billboard
+
+        if not attachBillboardToHead(targetPlayer, billboard) then
+            local charConn
+            charConn = targetPlayer.CharacterAdded:Connect(function()
+                task.wait(0.2)
+                if attachBillboardToHead(targetPlayer, billboard) then
+                    charConn:Disconnect()
+                end
+            end)
+        end
+
+        local respawnConn = targetPlayer.CharacterAdded:Connect(function()
+            task.wait(0.2)
+            attachBillboardToHead(targetPlayer, billboard)
+        end)
+
+        targetPlayer.AncestryChanged:Connect(function()
+            if not targetPlayer:IsDescendantOf(game) then
+                pcall(function() respawnConn:Disconnect() end)
+                if billboard and billboard.Parent then
+                    billboard:Destroy()
+                end
+                DiabloUserBillboards[targetPlayer] = nil
+            end
+        end)
+
+        pcall(function()
+            WindUI:Notify({
+                Title = "Diablo",
+                Content = targetPlayer.Name .. " is also using Diablo!",
+                Icon = "users",
+                Duration = 4,
+            })
+        end)
+    end
+
+    local function removeDiabloBillboard(targetPlayer)
+        if DiabloUserBillboards[targetPlayer] then
+            pcall(function() DiabloUserBillboards[targetPlayer]:Destroy() end)
+            DiabloUserBillboards[targetPlayer] = nil
+        end
+    end
+
+    local function onUserMarkerAdded(marker)
+        local userId = tonumber(marker.Name)
+        if not userId or userId == player.UserId then return end
+        local targetPlayer = Players:GetPlayerByUserId(userId)
+        if targetPlayer then
+            createDiabloBillboard(targetPlayer)
+        end
+    end
+
+    local function onUserMarkerRemoved(marker)
+        local userId = tonumber(marker.Name)
+        if not userId then return end
+        local targetPlayer = Players:GetPlayerByUserId(userId)
+        if targetPlayer then
+            removeDiabloBillboard(targetPlayer)
+        end
+    end
+
+    local myMarkerName = tostring(player.UserId)
+    local existingMarker = DiabloUsersFolder:FindFirstChild(myMarkerName)
+    if existingMarker then
+        pcall(function() existingMarker:Destroy() end)
+    end
+
+    local myMarker = Instance.new("BoolValue")
+    myMarker.Name = myMarkerName
+    myMarker.Value = true
+    myMarker.Parent = DiabloUsersFolder
+
+    for _, marker in ipairs(DiabloUsersFolder:GetChildren()) do
+        onUserMarkerAdded(marker)
+    end
+
+    DiabloUsersFolder.ChildAdded:Connect(onUserMarkerAdded)
+    DiabloUsersFolder.ChildRemoved:Connect(onUserMarkerRemoved)
+
+    Players.PlayerRemoving:Connect(function(plr)
+        if plr == player then
+            pcall(function()
+                local m = DiabloUsersFolder:FindFirstChild(myMarkerName)
+                if m then m:Destroy() end
+            end)
+        else
+            removeDiabloBillboard(plr)
+        end
+    end)
+end
+
 print("Diablo loaded successfully.")
