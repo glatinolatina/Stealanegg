@@ -1,3 +1,163 @@
+local _check_Players = game:GetService("Players")
+local _check_TweenService = game:GetService("TweenService")
+local _check_CoreGui = game:GetService("CoreGui")
+local _check_player = _check_Players.LocalPlayer
+
+local REQUIRED_FUNCS = {
+    "getgenv",
+    "hookmetamethod",
+    "getnamecallmethod",
+    "checkcaller",
+    "newcclosure",
+    "getgc",
+    "setmetatable",
+}
+
+local missing = {}
+for _, name in ipairs(REQUIRED_FUNCS) do
+    local ok = pcall(function()
+        local f = loadstring("return " .. name)
+        if f then f() end
+    end)
+    if not ok then
+        table.insert(missing, name)
+    end
+end
+
+local debugOk = pcall(function()
+    local f = function() end
+    debug.getinfo(f, "n")
+    debug.getupvalues(f)
+end)
+if not debugOk then
+    table.insert(missing, "debug library")
+end
+
+local function showWarning(msg)
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "ExecutorCompatWarning"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    pcall(function() sg.Parent = _check_CoreGui end)
+    if not sg.Parent then sg.Parent = _check_player:WaitForChild("PlayerGui") end
+
+    local blur = Instance.new("Frame")
+    blur.Size = UDim2.new(1, 0, 1, 0)
+    blur.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    blur.BackgroundTransparency = 0.35
+    blur.BorderSizePixel = 0
+    blur.ZIndex = 100
+    blur.Parent = sg
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 320, 0, 140)
+    card.Position = UDim2.new(0.5, -160, 0.5, -70)
+    card.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    card.BorderSizePixel = 0
+    card.ZIndex = 101
+    card.Parent = sg
+
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
+
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Color = Color3.fromRGB(255, 80, 80)
+    stroke.Thickness = 2
+
+    local icon = Instance.new("TextLabel", card)
+    icon.Size = UDim2.new(1, 0, 0, 36)
+    icon.Position = UDim2.new(0, 0, 0, 14)
+    icon.BackgroundTransparency = 1
+    icon.Text = "⚠️"
+    icon.TextSize = 28
+    icon.Font = Enum.Font.GothamBold
+    icon.TextColor3 = Color3.fromRGB(255, 80, 80)
+    icon.ZIndex = 102
+
+    local title = Instance.new("TextLabel", card)
+    title.Size = UDim2.new(1, -24, 0, 22)
+    title.Position = UDim2.new(0, 12, 0, 52)
+    title.BackgroundTransparency = 1
+    title.Text = "Executor Not Supported"
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.TextColor3 = Color3.fromRGB(240, 240, 245)
+    title.ZIndex = 102
+
+    local body = Instance.new("TextLabel", card)
+    body.Size = UDim2.new(1, -24, 0, 40)
+    body.Position = UDim2.new(0, 12, 0, 78)
+    body.BackgroundTransparency = 1
+    body.Text = msg
+    body.TextSize = 12
+    body.Font = Enum.Font.Gotham
+    body.TextColor3 = Color3.fromRGB(180, 180, 190)
+    body.TextWrapped = true
+    body.ZIndex = 102
+end
+
+local function showSuccessPopup()
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "ExecutorCompatSuccess"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    pcall(function() sg.Parent = _check_CoreGui end)
+    if not sg.Parent then sg.Parent = _check_player:WaitForChild("PlayerGui") end
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 260, 0, 44)
+    card.Position = UDim2.new(0.5, -130, 0, -60)
+    card.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    card.BorderSizePixel = 0
+    card.ZIndex = 101
+    card.Parent = sg
+
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Color = Color3.fromRGB(80, 220, 120)
+    stroke.Thickness = 1.5
+
+    local icon = Instance.new("TextLabel", card)
+    icon.Size = UDim2.new(0, 30, 1, 0)
+    icon.Position = UDim2.new(0, 10, 0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Text = "✅"
+    icon.TextSize = 18
+    icon.Font = Enum.Font.GothamBold
+    icon.TextColor3 = Color3.fromRGB(80, 220, 120)
+    icon.ZIndex = 102
+
+    local lbl = Instance.new("TextLabel", card)
+    lbl.Size = UDim2.new(1, -50, 1, 0)
+    lbl.Position = UDim2.new(0, 40, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Executor Supported"
+    lbl.TextSize = 14
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextColor3 = Color3.fromRGB(240, 240, 245)
+    lbl.ZIndex = 102
+
+    _check_TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -130, 0, 24)
+    }):Play()
+
+    task.delay(2.5, function()
+        local out = _check_TweenService:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, -130, 0, -60)
+        })
+        out:Play()
+        out.Completed:Wait()
+        sg:Destroy()
+    end)
+end
+
+if #missing > 0 then
+    showWarning("Your executor is missing required functions:\n" .. table.concat(missing, ", "))
+    return
+else
+    showSuccessPopup()
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
