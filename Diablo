@@ -358,7 +358,7 @@ MainTab:Section({ Title = "Combat / Physics", Icon = "shield", Opened = true })
 
 local AntiKnockbackToggle = MainTab:Toggle({
     Title = "Anti Knockback",
-    Desc = "Prevents being pushed around by physics.",
+    Desc = "Prevents being flung.",
     Icon = "anchor",
     Type = "Toggle",
     Value = AntiKnockbackEnabled,
@@ -370,7 +370,7 @@ local AntiKnockbackToggle = MainTab:Toggle({
 
 local AntiRagdollToggle = MainTab:Toggle({
     Title = "Anti Ragdoll",
-    Desc = "Prevents ragdoll / fling states.",
+    Desc = "Prevents ragdoll by either gaurd or player.",
     Icon = "user-x",
     Type = "Toggle",
     Value = AntiRagdollEnabled,
@@ -382,7 +382,7 @@ local AntiRagdollToggle = MainTab:Toggle({
 
 local InstantAccelToggle = MainTab:Toggle({
     Title = "Instant Acceleration",
-    Desc = "Instantly reach max velocity when moving.",
+    Desc = "Instantly reach max velocity when moving Dork.",
     Icon = "fast-forward",
     Type = "Toggle",
     Value = InstantAccelerationEnabled,
@@ -408,7 +408,7 @@ MainTab:Divider()
 
 MainTab:Paragraph({
     Title = "Diablo Utility",
-    Desc = "Drag the window to move. Settings auto-save across sessions.",
+    Desc = "Script still on progress so expect more changes.",
     Icon = "info",
 })
 
@@ -467,7 +467,7 @@ SettingsTab:Section({ Title = "About", Icon = "info", Opened = true })
 
 SettingsTab:Paragraph({
     Title = "Diablo",
-    Desc = "A clean utility hub built with WindUI.\\nMade by Diablo.",
+    Desc = "ELLLLLLLLLLLLLLLLLLLLLLLLDIAAAAAAABLOOOOOOOO.",
     Icon = "zap",
 })
 
