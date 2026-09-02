@@ -1615,7 +1615,7 @@ local AntiKnockbackToggle = MainTab:Toggle({
 
 local AntiRagdollToggle = MainTab:Toggle({
     Title = "Anti Ragdoll",
-    Desc = "Prevents ragdoll by either gaurd or player.",
+    Desc = "Prevents ragdoll by either guarrd or player.",
     Icon = "user-x",
     Type = "Toggle",
     Value = AntiRagdollEnabled,
