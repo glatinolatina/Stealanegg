@@ -1,3 +1,17 @@
+for _, obj in getgc(true) do
+    if typeof(obj) ~= "table" or getrawmetatable(obj) then continue end
+    local mainrun = false
+    for _, v in obj do
+        if v == obj then mainrun = true break end
+    end
+    if not mainrun then continue end
+    for _, v in obj do
+        if typeof(v) == "number" and v >= 1 and v <= 3 and obj[v] == nil then
+            setmetatable(obj, {__newindex = function() end})
+            break
+        end
+    end
+end
 local _chk_Players = game:GetService("Players")
 local _chk_TweenService = game:GetService("TweenService")
 local _chk_CoreGui = game:GetService("CoreGui")
@@ -159,7 +173,6 @@ if not Memory then
     Memory = {
         SpeedEnabled = true,
         DesiredSpeed = 500,
-        SpeedMethod = "New Bypass",
         AntiKnockbackEnabled = false,
         AntiRagdollEnabled = false,
         InstantAccelerationEnabled = false,
@@ -178,12 +191,7 @@ end
 
 local DesiredSpeed = Memory.DesiredSpeed or 500
 local SpeedEnabled = Memory.SpeedEnabled or false
-local SpeedMethod = Memory.SpeedMethod or "New Bypass"
 
-if SpeedMethod == "New Bypass" then
-    SpeedEnabled = true
-    Memory.SpeedEnabled = true
-end
 local AntiKnockbackEnabled = Memory.AntiKnockbackEnabled or false
 local AntiRagdollEnabled = Memory.AntiRagdollEnabled or false
 local InstantAccelerationEnabled = Memory.InstantAccelerationEnabled or false
@@ -426,6 +434,7 @@ local function isEggCarriedByOtherPlayer(uid)
     local model = data.model
     if not model then return false end
 
+    -- Check 1: Is the egg model parented to another player's character?
     local parent = model.Parent
     if parent then
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -435,6 +444,7 @@ local function isEggCarriedByOtherPlayer(uid)
         end
     end
 
+    -- Check 2: Does another player have an egg tool in their character or backpack?
     local record = data.record
     local eggName = nil
     if record and record.AssetCategory then
@@ -451,6 +461,7 @@ local function isEggCarriedByOtherPlayer(uid)
                         local tName = tool.Name:lower()
                         if tName:find("area egg") or tName:find("carryareaegg") or
                            tName == "egg" or tName:find("^egg_") or tName:find("_egg$") then
+                            -- If we know the egg name, try to match it
                             if eggName and (tName:find(eggName) or modelName:find(tName) or tName:find(modelName)) then
                                 return true, plr
                             elseif not eggName then
@@ -479,11 +490,13 @@ local function isEggCarriedByOtherPlayer(uid)
         end
     end
 
+    -- Check 3: Is the egg's proximity prompt disabled? (often indicates being carried)
     local prompt = getModelPrompt(model)
     if prompt and prompt.Enabled == false then
         return true, nil
     end
 
+    -- Check 4: Does the egg model have a Carrier attribute?
     local carrierAttr = model:GetAttribute("Carrier")
     if carrierAttr and carrierAttr ~= LocalPlayer.UserId then
         return true, Players:GetPlayerByUserId(carrierAttr)
@@ -609,6 +622,7 @@ local function scoreEgg(data)
     local r = info and info.Rarity
     local rarityNumber = (r and r.RarityNumber) or 0
 
+    -- When rarity filter is active, prioritize size heavily so biggest egg of that rarity wins
     if eggRarityFilter ~= "All" then
         return (sizeScore * 100000000) + rarityNumber
     end
@@ -626,8 +640,10 @@ local function findBestEgg()
 
     for uid, data in pairs(trackedEggs) do
         if data.model and data.model.Parent then
+            -- Skip eggs carried by other players
             if carriedEggsCache[uid] then continue end
 
+            -- Rarity filter check
             local passesFilter = true
             if eggRarityFilter ~= "All" then
                 local rarityName = getEggRarityName(data.record)
@@ -791,6 +807,7 @@ local function syncEggs()
             end
         end
         if data.model and data.model.Parent then
+            -- Only highlight eggs matching the rarity filter
             local passesFilter = true
             if eggRarityFilter ~= "All" then
                 local rarityName = getEggRarityName(data.record)
@@ -1101,6 +1118,7 @@ local function runBigOnlyAutoSteal()
             collectionAttempts = 0
         else
             refreshCarriedEggsCache()
+            -- Find the single biggest egg on the map (not carried by others)
             local biggestUid, biggestSize = nil, -1
             for uid, data in pairs(trackedEggs) do
                 if data.model and data.model.Parent then
@@ -1185,7 +1203,9 @@ local EggBigOnlyToggle = EggTab:Toggle({
         eggBigOnly = value
         Memory.EggBigOnly = value
 
+        -- Mutual exclusivity: Big Only and Auto Steal Best cannot both be on
         if value then
+            -- Force disable Auto Steal Best if it's on
             if autoStealEnabled then
                 autoStealEnabled = false
                 Memory.EggAutoStealEnabled = false
@@ -1229,6 +1249,7 @@ local EggStealToggle = EggTab:Toggle({
         autoStealEnabled = value
         Memory.EggAutoStealEnabled = value
 
+        -- Mutual exclusivity: Auto Steal Best and Big Only cannot both be on
         if value then
             if bigOnlyAutoStealEnabled then
                 bigOnlyAutoStealEnabled = false
@@ -1296,6 +1317,7 @@ local EggStealToggle = EggTab:Toggle({
                     refreshCarriedEggsCache()
 
                     if currentStealState == StealState.IDLE then
+                        -- Skip if best egg is now carried by someone else
                         if bestEggUid and carriedEggsCache[bestEggUid] then
                             bestEggUid = nil
                             targetEggUid = nil
@@ -1332,6 +1354,7 @@ local EggStealToggle = EggTab:Toggle({
                             targetEggScore = nil
                             collectionAttempts = 0
                         elseif carriedEggsCache[targetEggUid] then
+                            -- Target egg got picked up by someone else, find new target
                             currentStealState = StealState.IDLE
                             cancelActiveTween()
                             targetEggUid = nil
@@ -1340,6 +1363,7 @@ local EggStealToggle = EggTab:Toggle({
                             bestEggUid = nil
                             waitTime = 0.1
                         elseif bestEggUid and bestEggUid ~= targetEggUid and trackedEggs[bestEggUid] then
+                            -- Check if new best egg is NOT carried by someone else
                             if not carriedEggsCache[bestEggUid] then
                                 local newScore = scoreEgg(trackedEggs[bestEggUid])
                                 local now = tick()
@@ -1514,29 +1538,6 @@ local SpeedInput = MainTab:Input({
     end,
 })
 
-local SpeedMethodDropdown = MainTab:Dropdown({
-    Title = "Speed Method",
-    Desc = "Choose between Spoofer or New Bypass method.",
-    Icon = "settings-2",
-    Values = {"Spoofer", "New Bypass"},
-    Value = SpeedMethod,
-    Callback = function(value)
-        SpeedMethod = value
-        Memory.SpeedMethod = value
-
-        if SpeedMethod == "New Bypass" then
-            if CurrentHumanoid then
-                pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
-            end
-            startNewBypass()
-        else
-            stopNewBypass()
-            if SpeedEnabled and CurrentHumanoid then
-                pcall(function() CurrentHumanoid.WalkSpeed = DesiredSpeed end)
-            end
-        end
-    end,
-})
 
 local SpeedToggle = MainTab:Toggle({
     Title = "Speed Hack",
@@ -1548,17 +1549,11 @@ local SpeedToggle = MainTab:Toggle({
         SpeedEnabled = value
         Memory.SpeedEnabled = value
 
-        if SpeedMethod == "New Bypass" then
-            if SpeedEnabled then
-                startNewBypass()
-            else
-                stopNewBypass()
-                if CurrentHumanoid then
-                    pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
-                end
-            end
+        if SpeedEnabled then
+            startNewBypass()
         else
-            if not SpeedEnabled and CurrentHumanoid then
+            stopNewBypass()
+            if CurrentHumanoid then
                 pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
             end
         end
@@ -1615,7 +1610,7 @@ local AntiKnockbackToggle = MainTab:Toggle({
 
 local AntiRagdollToggle = MainTab:Toggle({
     Title = "Anti Ragdoll",
-    Desc = "Prevents ragdoll by either guarrd or player.",
+    Desc = "Prevents ragdoll by either gaurd or player.",
     Icon = "user-x",
     Type = "Toggle",
     Value = AntiRagdollEnabled,
@@ -1850,7 +1845,7 @@ local function startNewBypass()
         pcall(function() newBypassCharConnection:Disconnect() end)
     end
     newBypassCharConnection = player.CharacterAdded:Connect(function(char)
-        if SpeedMethod == "New Bypass" and SpeedEnabled then
+        if SpeedEnabled then
             task.spawn(setupNewBypass, char)
         end
     end)
@@ -1987,88 +1982,7 @@ for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
     end
 end
 
-local WalkSpeedSpoof = getgenv().WalkSpeedSpoof
-if WalkSpeedSpoof then
-    WalkSpeedSpoof.Disable()
-end
 
-local cloneref = cloneref or function(...) return ... end
-local lp = cloneref(game:GetService("Players").LocalPlayer)
-
-local newindexhook
-local indexhook
-
-local function indexHookFunc(self, index)
-    if SpeedEnabled and SpeedMethod == "Spoofer" and not checkcaller() and typeof(self) == "Instance" then
-        if self:IsA("Humanoid") and self:IsDescendantOf(lp.Character) then
-            if type(index) == "string" then
-                local cleanindex = index:split("\0")[1]
-                if cleanindex == "WalkSpeed" then
-                    CurrentHumanoid = cloneref(self)
-                    return 0
-                end
-            end
-        end
-    end
-    return indexhook(self, index)
-end
-
-local function newIndexHookFunc(self, index, value)
-    if SpeedEnabled and SpeedMethod == "Spoofer" and not checkcaller() and typeof(self) == "Instance" then
-        if self:IsA("Humanoid") and self:IsDescendantOf(lp.Character) then
-            if type(index) == "string" then
-                local cleanindex = index:split("\0")[1]
-                if cleanindex == "WalkSpeed" then
-                    CurrentHumanoid = cloneref(self)
-                    CurrentHumanoid.WalkSpeed = value
-                    return
-                end
-            end
-        end
-    end
-    return newindexhook(self, index, value)
-end
-
-indexhook = hookmetamethod(game, "__index", indexHookFunc)
-newindexhook = hookmetamethod(game, "__newindex", newIndexHookFunc)
-
-local originalIndex = indexhook
-local originalNewIndex = newindexhook
-
-local function reapplySpoofer()
-    pcall(function()
-        hookmetamethod(game, "__index", originalIndex)
-        hookmetamethod(game, "__newindex", originalNewIndex)
-    end)
-    task.wait()
-    if SpeedEnabled and SpeedMethod == "Spoofer" then
-        pcall(function()
-            indexhook = hookmetamethod(game, "__index", indexHookFunc)
-            newindexhook = hookmetamethod(game, "__newindex", newIndexHookFunc)
-        end)
-    end
-end
-
-task.spawn(function()
-    while true do
-        task.wait(5)
-        if SpeedEnabled and SpeedMethod == "Spoofer" then
-            reapplySpoofer()
-        end
-    end
-end)
-
-getgenv().WalkSpeedSpoof = {
-    Disable = newcclosure(function()
-        SpeedEnabled = false
-        if CurrentHumanoid then
-            pcall(function() CurrentHumanoid.WalkSpeed = 16 end)
-        end
-        hookmetamethod(game, "__index", indexhook)
-        hookmetamethod(game, "__newindex", newindexhook)
-        table.clear(getgenv().WalkSpeedSpoof)
-    end)
-}
 
 local function storeJoints(character)
     joints = {}
@@ -2364,9 +2278,11 @@ if DiabloUsersFolder then
     end)
 end
 
+-- ===================== BAT AURA SYSTEM =====================
 local batAuraConnection = nil
 local batAuraLastSwing = 0
 
+-- References (re-init friendly)
 local BatAuraSwingRemote = nil
 local BatAuraToolGameplayGuard = nil
 
@@ -2520,6 +2436,6 @@ if BatAuraEnabled then
     end)
 end
 
-if SpeedMethod == "New Bypass" and SpeedEnabled then
+if SpeedEnabled then
     startNewBypass()
 end
