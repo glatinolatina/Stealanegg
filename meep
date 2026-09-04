@@ -1,0 +1,461 @@
+return function(Window, player)
+    local RunService = game:GetService("RunService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Players = game:GetService("Players")
+
+    local items = {}
+    local maxLimits = {
+        ["Mysterious Arrow"] = 25,
+        ["Rokakaka"] = 25,
+        ["Gold Coin"] = 45,
+        ["Diamond"] = 25,
+        ["Pure Rokakaka"] = 999,
+        ["Quinton's Glove"] = 10,
+        ["Steel Ball"] = 10,
+        ["Rib Cage of The Saint's Corpse"] = 10,
+        ["Zepellin's Headband"] = 10,
+        ["Zeppeli's Hat"] = 10,
+        ["Caesar's Headband"] = 10,
+        ["Clackers"] = 10,
+        ["Stone Mask"] = 10,
+        ["Ancient Scroll"] = 10,
+        ["Dio's Diary"] = 10,
+        ["Lucky Stone Mask"] = 999,
+        ["Lucky Arrow"] = 999,
+        ["Gold Umbrella"] = 999,
+        ["Christmas Present"] = 999
+    }
+    local nonSellable = {"Blue Candy", "Red Candy", "Green Candy", "Yellow Candy", "Lucky Arrow", "Lucky Stone Mask", "Christmas Present"}
+    local itemOptions = {}
+    local seen = {}
+    for item in pairs(maxLimits) do
+        table.insert(itemOptions, item)
+        seen[item] = true
+    end
+    for _, candy in ipairs(nonSellable) do
+        if not seen[candy] then
+            table.insert(itemOptions, candy)
+            seen[candy] = true
+        end
+    end
+    table.sort(itemOptions)
+    local worthlessItems = {"Gold Coin", "Diamond", "Quinton's Glove", "Zeppeli's Hat", "Caesar's Headband", "Ancient Scroll"}
+
+    local function updateItems()
+        items = {}
+        for itemName in pairs(maxLimits) do
+            items[itemName] = 0
+        end
+        local function countInContainer(container)
+            if not container then return end
+            for _, item in pairs(container:GetChildren()) do
+                if item and item.Name and maxLimits[item.Name] then
+                    items[item.Name] = (items[item.Name] or 0) + 1
+                end
+            end
+        end
+        countInContainer(player.Backpack)
+        if player.Character then
+            countInContainer(player.Character)
+        end
+    end
+
+    -- REMOTE SPY: Use this to capture the exact arguments when manually selling
+    -- Enable this, manually sell 1 item to the merchant, then check console/F9
+    local spyEnabled = false
+    local function toggleRemoteSpy(state)
+        spyEnabled = state
+        local plr = Players.LocalPlayer
+        if not plr or not plr.Character then return end
+        local remote = plr.Character:FindFirstChild("RemoteEvent")
+        if not remote then return end
+
+        if state then
+            if not rawget(remote, "_spyHooked") then
+                local oldFire = remote.FireServer
+                remote.FireServer = function(self, ...)
+                    local args = {...}
+                    print("=== REMOTE SPY ===")
+                    print("Action:", tostring(args[1]))
+                    for i = 2, #args do
+                        print("Arg " .. i .. ":", typeof(args[i]), tostring(args[i]))
+                        if typeof(args[i]) == "table" then
+                            for k, v in pairs(args[i]) do
+                                print("  [" .. tostring(k) .. "] =", typeof(v), tostring(v))
+                            end
+                        end
+                    end
+                    print("==================")
+                    return oldFire(self, ...)
+                end
+                rawset(remote, "_spyHooked", true)
+                Window:Notify("Spy", "Remote spy ENABLED. Manually sell 1 item and check console (F9).", 5)
+            end
+        end
+    end
+
+    local function getSellRemote()
+        local plr = Players.LocalPlayer
+        if plr and plr.Character then
+            local remote = plr.Character:FindFirstChild("RemoteEvent")
+            if remote then return remote end
+        end
+        return nil
+    end
+
+    local function sellItem(item)
+        if not item then return false end
+        local itemName = typeof(item) == "Instance" and item.Name or item
+        if table.find(nonSellable, itemName) then
+            Window:Notify("Selling", "Cannot sell " .. itemName .. " as it is not sellable.", 3)
+            return false
+        end
+
+        local plr = Players.LocalPlayer
+        if not plr then return false end
+
+        local instanceToSell
+        if typeof(item) == "Instance" then
+            instanceToSell = item
+        elseif typeof(item) == "string" then
+            instanceToSell = plr.Backpack:FindFirstChild(item) or (plr.Character and plr.Character:FindFirstChild(item))
+        else
+            return false
+        end
+
+        if not instanceToSell or not instanceToSell.Parent then
+            return false
+        end
+
+        -- Make sure item is on character so merchant can see it
+        local living = workspace:FindFirstChild("Living") or workspace
+        local target = living:FindFirstChild(plr.Name) or plr.Character or workspace
+        pcall(function()
+            instanceToSell.Parent = target
+        end)
+
+        local Event = getSellRemote()
+        if not Event then
+            Window:Notify("Selling", "RemoteEvent not found on character.", 3)
+            return false
+        end
+
+        local merchantDialogue = ReplicatedStorage:FindFirstChild("Dialogue") and ReplicatedStorage.Dialogue:FindFirstChild("Merchant")
+        if not merchantDialogue then
+            Window:Notify("Selling", "Merchant dialogue object not found.", 3)
+            return false
+        end
+
+        -- ============================================
+        -- NEW DIALOGUE SYSTEM: PromptTriggered
+        -- ============================================
+        -- Stage 1: Open dialogue with merchant
+        -- Stage 2: Select "I'd like to sell this" (option index 2)
+        -- Stage 3: Select the item name
+        -- Stage 4: Confirm "Deal"
+        -- ============================================
+
+        local sold = false
+
+        -- Try the new PromptTriggered flow
+        pcall(function()
+            -- Step 1: Trigger the dialogue prompt
+            Event:FireServer("PromptTriggered", merchantDialogue)
+            task.wait(0.3)
+
+            -- Step 2: Select "I'd like to sell this" 
+            -- In most updated YBA dialogue, options are passed as additional arguments
+            -- Option 1 = Buy, Option 2 = Sell, Option 3 = Nevermind
+            Event:FireServer("PromptTriggered", merchantDialogue, 2)
+            task.wait(0.3)
+
+            -- Step 3: Select the item to sell
+            -- The game likely expects the item name or the item instance here
+            Event:FireServer("PromptTriggered", merchantDialogue, itemName)
+            task.wait(0.3)
+
+            -- Step 4: Confirm the deal
+            Event:FireServer("PromptTriggered", merchantDialogue, "Deal")
+            task.wait(0.2)
+
+            sold = true
+        end)
+
+        if sold then
+            return true
+        end
+
+        -- ============================================
+        -- FALLBACK: Old EndDialogue method
+        -- ============================================
+        local args = {
+            [1] = "EndDialogue",
+            [2] = {
+                ["NPC"] = "Merchant",
+                ["Option"] = "Option2",
+                ["Dialogue"] = "Dialogue5"
+            }
+        }
+
+        pcall(function()
+            Event:FireServer(unpack(args))
+        end)
+
+        task.wait(0.15)
+        return true
+    end
+
+    local function sellAll(itemName)
+        updateItems()
+        local count = items[itemName] or 0
+        if count == 0 then
+            Window:Notify("Selling", "No " .. itemName .. " found.", 3)
+            return
+        end
+        local sold = 0
+        while true do
+            local item = player.Backpack:FindFirstChild(itemName) or (player.Character and player.Character:FindFirstChild(itemName))
+            if not item then break end
+            if sellItem(item) then
+                sold = sold + 1
+            else
+                break
+            end
+        end
+        Window:Notify("Selling", "Sold " .. sold .. " " .. itemName .. (sold > 1 and "s" or "") .. ".", 3)
+    end
+
+    local function sellAllSelected(selectedItems)
+        updateItems()
+        local total = 0
+        for _, itemName in ipairs(selectedItems) do
+            total = total + (items[itemName] or 0)
+        end
+        if total == 0 then
+            Window:Notify("Selling", "No selected items found.", 3)
+            return
+        end
+        local sold = 0
+        for _, itemName in ipairs(selectedItems) do
+            while true do
+                local item = player.Backpack:FindFirstChild(itemName) or (player.Character and player.Character:FindFirstChild(itemName))
+                if not item then break end
+                if sellItem(item) then
+                    sold = sold + 1
+                else
+                    break
+                end
+            end
+        end
+        Window:Notify("Selling", "Sold " .. sold .. " selected item" .. (sold > 1 and "s" or "") .. ".", 3)
+    end
+
+    local function sellAllWorthless()
+        updateItems()
+        local total = 0
+        for _, itemName in ipairs(worthlessItems) do
+            total = total + (items[itemName] or 0)
+        end
+        if total == 0 then
+            Window:Notify("Selling", "No worthless items found.", 3)
+            return
+        end
+        local sold = 0
+        for _, itemName in ipairs(worthlessItems) do
+            while true do
+                local item = player.Backpack:FindFirstChild(itemName) or (player.Character and player.Character:FindFirstChild(itemName))
+                if not item then break end
+                if sellItem(item) then
+                    sold = sold + 1
+                else
+                    break
+                end
+            end
+        end
+        Window:Notify("Selling", "Sold " .. sold .. " worthless item" .. (sold > 1 and "s" or "") .. ".", 3)
+    end
+
+    local function sellInventory()
+        updateItems()
+        local sold = 0
+        for itemName, count in pairs(items) do
+            if count > 0 and not table.find(nonSellable, itemName) then
+                while true do
+                    local item = player.Backpack:FindFirstChild(itemName) or (player.Character and player.Character:FindFirstChild(itemName))
+                    if not item then break end
+                    if sellItem(item) then
+                        sold = sold + 1
+                    else
+                        break
+                    end
+                end
+            end
+        end
+        Window:Notify("Selling", "Sold " .. sold .. " item" .. (sold > 1 and "s" or "") .. " from inventory.", 3)
+    end
+
+    local autoSellMax = true
+    local function checkAndSellMax()
+        local soldSummary = {}
+        local tempCounts = {}
+        for name in pairs(maxLimits) do
+            tempCounts[name] = 0
+        end
+        local containers = {player.Backpack}
+        if player.Character then
+            table.insert(containers, player.Character)
+        end
+        for _, container in ipairs(containers) do
+            local children = container:GetChildren()
+            for _, item in ipairs(children) do
+                local name = item.Name
+                if maxLimits[name] then
+                    tempCounts[name] = tempCounts[name] + 1
+                    if (tempCounts[name] >= (maxLimits[name] or 25)) and autoSellMax then
+                        if sellItem(item) then
+                            soldSummary[name] = (soldSummary[name] or 0) + 1
+                        end
+                    end
+                end
+            end
+        end
+        local totalSold = 0
+        local parts = {}
+        for name, n in pairs(soldSummary) do
+            totalSold = totalSold + n
+            table.insert(parts, n .. "x " .. name)
+        end
+        if totalSold > 0 then
+            local msg = "Auto sold: " .. table.concat(parts, ", ")
+            Window:Notify("Auto Sell", msg, 3)
+        end
+    end
+
+    local autoSellSelected = false
+    local selectedAutoSellItems = {}
+    local selectedSellAllItems = {}
+    local lastAutoSellNotify = {}
+    local autoSellAllSelectedLoop = false
+    local autoSellInterval = 3
+
+    player.Backpack.ChildAdded:Connect(function(item)
+        if autoSellMax then
+            checkAndSellMax()
+        end
+        if autoSellSelected and table.find(selectedAutoSellItems, item.Name) then
+            task.wait(0.2)
+            local now = tick()
+            local last = lastAutoSellNotify[item.Name] or 0
+            if now - last >= 0.5 then
+                if sellItem(item) then
+                    Window:Notify("Auto Sell", "Auto sold " .. item.Name .. " on pickup.", 3)
+                    lastAutoSellNotify[item.Name] = now
+                end
+            end
+        end
+    end)
+
+    player.CharacterAdded:Connect(function(char)
+        char.ChildAdded:Connect(function(item)
+            if autoSellMax then
+                checkAndSellMax()
+            end
+            if autoSellSelected and table.find(selectedAutoSellItems, item.Name) then
+                task.wait(0.2)
+                local now = tick()
+                local last = lastAutoSellNotify[item.Name] or 0
+                if now - last >= 0.5 then
+                    if sellItem(item) then
+                        Window:Notify("Auto Sell", "Auto sold " .. item.Name .. " on pickup.", 3)
+                        lastAutoSellNotify[item.Name] = now
+                    end
+                end
+            end
+        end)
+    end)
+
+    local SellingTab = Window:Tab("Selling", "dollar-sign")
+    local SellLeft = SellingTab:Section("Auto Sell", "Left", "shopping-cart")
+    local SellRight = SellingTab:Section("Manual Sell", "Right", "hand-coins")
+
+    SellLeft:Toggle("Auto Sell on Max", true, function(state)
+        autoSellMax = state
+        if autoSellMax then
+            Window:Notify("Selling", "Auto Sell on Max enabled.", 3)
+            checkAndSellMax()
+        else
+            Window:Notify("Selling", "Auto Sell on Max disabled.", 3)
+        end
+    end)
+
+    SellLeft:MultiDropdown("Auto Sell Items (on Pickup)", itemOptions, {}, function(selectedList, changedItem)
+        selectedAutoSellItems = selectedList
+    end, true)
+
+    SellLeft:Toggle("Auto Sell Selected on Pickup", false, function(state)
+        autoSellSelected = state
+        if autoSellSelected then
+            Window:Notify("Selling", "Auto Sell Selected enabled.", 3)
+        else
+            Window:Notify("Selling", "Auto Sell Selected disabled.", 3)
+        end
+    end)
+
+    SellLeft:MultiDropdown("Select Items to Sell All Now", itemOptions, {}, function(selectedList, changedItem)
+        selectedSellAllItems = selectedList
+    end, true)
+
+    SellLeft:Button("Sell All Selected Now", function()
+        sellAllSelected(selectedSellAllItems)
+    end)
+
+    SellLeft:Slider("Auto Sell Interval (minutes)", false, 1, 10, 3, function(value)
+        autoSellInterval = value
+    end)
+
+    SellLeft:Toggle("Auto Sell All Selected Loop", false, function(state)
+        autoSellAllSelectedLoop = state
+        if state then
+            Window:Notify("Selling", "Auto Sell enabled: Every " .. autoSellInterval .. " minute(s)", 3)
+            spawn(function()
+                while autoSellAllSelectedLoop do
+                    task.wait(autoSellInterval * 60)
+                    if autoSellAllSelectedLoop and #selectedSellAllItems > 0 then
+                        sellAllSelected(selectedSellAllItems)
+                    end
+                end
+            end)
+        else
+            Window:Notify("Selling", "Auto Sell All Selected disabled.", 3)
+        end
+    end)
+
+    -- REMOTE SPY TOGGLE (for debugging the new dialogue)
+    SellLeft:Toggle("Remote Spy (Debug)", false, function(state)
+        toggleRemoteSpy(state)
+    end)
+
+    SellRight:Button("Sell All Worthless Items", function()
+        sellAllWorthless()
+    end)
+
+    SellRight:Button("Sell Inventory", function()
+        sellInventory()
+    end)
+
+    getgenv().MethionSelling = {
+        items = items,
+        maxLimits = maxLimits,
+        nonSellable = nonSellable,
+        itemOptions = itemOptions,
+        worthlessItems = worthlessItems,
+        updateItems = updateItems,
+        sellItem = sellItem,
+        sellAll = sellAll,
+        sellAllSelected = sellAllSelected,
+        sellAllWorthless = sellAllWorthless,
+        sellInventory = sellInventory,
+        checkAndSellMax = checkAndSellMax,
+        toggleRemoteSpy = toggleRemoteSpy,
+    }
+end
