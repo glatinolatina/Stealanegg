@@ -185,6 +185,8 @@ if not Memory then
         EggBigOnly = false,
         BatAuraEnabled = false,
         AntiTrapEnabled = false,
+        AutoSellEnabled = false,
+        AutoSellRarities = {"Common", "Uncommon", "Rare", "Epic"},
     }
     getgenv().MergedUtilityMemory = Memory
 end
@@ -200,6 +202,8 @@ local FlyEnabled = Memory.FlyEnabled or false
 local FlySpeed = Memory.FlySpeed or 50
 local BatAuraEnabled = Memory.BatAuraEnabled or false
 local AntiTrapEnabled = Memory.AntiTrapEnabled or false
+local AutoSellEnabled = Memory.AutoSellEnabled or false
+local AutoSellRarities = Memory.AutoSellRarities or {"Common", "Uncommon", "Rare", "Epic"}
 
 local FlyBodyVelocity = nil
 local FlyBodyGyro = nil
@@ -308,6 +312,7 @@ Window:SetBackgroundTransparency(0.5)
 
 local MainTab = Window:Tab({ Title = "Main", Icon = "layout-dashboard" })
 local EggTab = Window:Tab({ Title = "Egg Steal", Icon = "egg" })
+local AutoSellTab = Window:Tab({ Title = "Auto Sell", Icon = "tag" })
 local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
 
 local LocalPlayer = Players.LocalPlayer
@@ -1700,6 +1705,42 @@ MainTab:Button({
     end,
 })
 
+
+-- ===================== AUTO SELL TAB =====================
+AutoSellTab:Section({ Title = "Auto Sell", Icon = "tag", Opened = true })
+
+local RarityOptions = {
+    "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic",
+    "Divine", "Secret", "Prismatic", "Eternal", "Transcendent",
+    "Titan", "Celestial", "Cosmic"
+}
+
+local SellRarityDropdown = AutoSellTab:Dropdown({
+    Title = "Sell Rarities",
+    Desc = "Select which egg rarities to auto sell.",
+    Icon = "filter",
+    Multi = true,
+    Values = RarityOptions,
+    Value = AutoSellRarities,
+    Callback = function(selected)
+        AutoSellRarities = selected
+        Memory.AutoSellRarities = selected
+    end,
+})
+
+
+AutoSellTab:Toggle({
+    Title = "Auto Sell",
+    Desc = "Automatically sell eggs of selected rarities.",
+    Icon = "tag",
+    Type = "Toggle",
+    Value = AutoSellEnabled,
+    Callback = function(value)
+        AutoSellEnabled = value
+        Memory.AutoSellEnabled = value
+    end,
+})
+
 SettingsTab:Section({ Title = "Window", Icon = "panel-top", Opened = true })
 
 SettingsTab:Button({
@@ -2439,3 +2480,94 @@ end
 if SpeedEnabled then
     startNewBypass()
 end
+
+-- ===================== AUTO SELL SYSTEM =====================
+local AutoSellUtility = {
+    ReplicatedStorage = game:GetService("ReplicatedStorage")
+}
+
+function AutoSellUtility:init()
+    self.Shared = self.ReplicatedStorage:FindFirstChild("Shared")
+    if not self.Shared then
+        return warn("[Auto Sell] failed to get Shared")
+    end
+
+    self.Data = self.ReplicatedStorage:FindFirstChild("Data")
+    if not self.Data then
+        return warn("[Auto Sell] failed to get Data")
+    end
+
+    self.Save = require(self.Shared:FindFirstChild("Save"))
+    if not self.Save then
+        return warn("[Auto Sell] failed to get Save")
+    end
+
+    self.Assets = require(self.Data:FindFirstChild("Assets"))
+    if not self.Assets then
+        return warn("[Auto Sell] failed to get Assets")
+    end
+
+    self.Packages = self.ReplicatedStorage:FindFirstChild("Packages")
+    if not self.Packages then
+        return warn("[Auto Sell] failed to get Packages")
+    end
+
+    self.Networking = self.Packages:FindFirstChild("Networking")
+    if not self.Networking then
+        return warn("[Auto Sell] failed to get Networking")
+    end
+
+    self.AskWearTool = self.Networking:FindFirstChild("RF/EggWorld/AskWearTool")
+    if not self.AskWearTool then
+        return warn("[Auto Sell] failed to get RF/EggWorld/AskWearTool")
+    end
+
+    self.SellPet = self.Networking:FindFirstChild("RE/PetSatchel/SellPet")
+    if not self.SellPet then
+        return warn("[Auto Sell] failed to get RE/PetSatchel/SellPet")
+    end
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if not AutoSellEnabled then continue end
+
+            local success, err = pcall(function()
+                local data = self.Save.Get()
+                if not data then return end
+                local inv = data.EggInventory
+                if not inv then return end
+
+                for Uid, eggdata in next, inv do
+                    if not AutoSellEnabled then break end
+                    if eggdata.Placement then continue end
+
+                    local assetInfo = self.Assets.Directory[eggdata.AssetCategory]
+                    if not assetInfo then continue end
+                    local rarity = assetInfo.Rarity
+                    if not rarity then continue end
+
+                    local rarityName = rarity.DisplayName or rarity.Name or "Unknown"
+                    if table.find(AutoSellRarities, rarityName) then
+                        pcall(function()
+                            self.AskWearTool:InvokeServer(Uid)
+                        end)
+                        task.wait(0.05)
+                        pcall(function()
+                            self.SellPet:FireServer({Uid})
+                        end)
+                        task.wait(0.1)
+                    end
+                end
+            end)
+
+            if not success then
+                warn("[Auto Sell] Error: " .. tostring(err))
+            end
+        end
+    end)
+
+    warn("[Auto Sell] Initialized successfully")
+end
+
+AutoSellUtility:init()
