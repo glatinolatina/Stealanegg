@@ -173,6 +173,7 @@ if not Memory then
     Memory = {
         SpeedEnabled = true,
         DesiredSpeed = 500,
+        SpeedBypassMethod = "Humanoid Clone",
         AntiKnockbackEnabled = false,
         AntiRagdollEnabled = false,
         InstantAccelerationEnabled = false,
@@ -193,6 +194,7 @@ end
 
 local DesiredSpeed = Memory.DesiredSpeed or 500
 local SpeedEnabled = Memory.SpeedEnabled or false
+local SpeedBypassMethod = Memory.SpeedBypassMethod or "Humanoid Clone"
 
 local AntiKnockbackEnabled = Memory.AntiKnockbackEnabled or false
 local AntiRagdollEnabled = Memory.AntiRagdollEnabled or false
@@ -877,6 +879,10 @@ local StealState = {
     RETURNING = "RETURNING",
     DEPOSITING = "DEPOSITING",
     WAITING_RESET = "WAITING_RESET",
+    WAITING = "WAITING",
+    RAGDOLLED_RUSH = "RAGDOLLED_RUSH",
+    MOVING_TO_BEST = "MOVING_TO_BEST",
+    COLLECTING_BEST = "COLLECTING_BEST",
 }
 
 local currentStealState = StealState.IDLE
@@ -1244,6 +1250,76 @@ local EggBigOnlyToggle = EggTab:Toggle({
     end,
 })
 
+local function isPlayerRagdolled()
+    local char = LocalPlayer.Character
+    if not char then return true end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return true end
+
+    -- Check PlatformStand (most common ragdoll indicator)
+    if hum.PlatformStand then return true end
+
+    -- Check humanoid state
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.FallingDown then
+        return true
+    end
+
+    -- Check for Ragdolled attribute on character or humanoid
+    if char:GetAttribute("Ragdolled") == true then return true end
+    if hum:GetAttribute("Ragdolled") == true then return true end
+    if char:GetAttribute("Ragdoll") == true then return true end
+    if hum:GetAttribute("Ragdoll") == true then return true end
+
+    -- Check if character has BallSocketConstraints (ragdoll joints)
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BallSocketConstraint") then
+            return true
+        end
+    end
+
+    -- Check if Motor6Ds are missing from key joints (ragdoll replaces them)
+    local hasMotor6D = false
+    local hasConstraint = false
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("Motor6D") then
+            hasMotor6D = true
+        elseif v:IsA("Constraint") then
+            hasConstraint = true
+        end
+    end
+    if hasConstraint and not hasMotor6D then
+        return true
+    end
+
+    return false
+end
+
+local function findNearestEgg()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local playerPos = hrp.Position
+    local nearestUid, nearestDist = nil, math.huge
+
+    refreshCarriedEggsCache()
+
+    for uid, data in pairs(trackedEggs) do
+        if data.model and data.model.Parent then
+            if carriedEggsCache[uid] then continue end
+            local bp = data.basePart or getModelBasePart(data.model)
+            if bp then
+                local dist = (playerPos - bp.Position).Magnitude
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearestUid = uid
+                end
+            end
+        end
+    end
+    return nearestUid, nearestDist
+end
+
 local EggStealToggle = EggTab:Toggle({
     Title = "Auto Steal Best",
     Desc = "Steals best egg currently on the game",
@@ -1289,10 +1365,10 @@ local EggStealToggle = EggTab:Toggle({
         local targetEggScore = nil
         local collectionAttempts = 0
         local maxCollectionAttempts = 20
-        local lastTargetSwitchTime = 0
-        local targetSwitchCooldown = 0.5
         local lastPromptFire = 0
         local promptFireInterval = 0.08
+        local wasRagdolled = false
+        local rushMode = false
 
         task.spawn(function()
             while autoStealEnabled do
@@ -1300,7 +1376,8 @@ local EggStealToggle = EggTab:Toggle({
 
                 syncEggs()
 
-                isCarryingEgg = checkCarryingEgg()
+                local carrying = checkCarryingEgg()
+                local ragdolled = isPlayerRagdolled()
 
                 if isAreaSealed() then
                     if currentStealState ~= StealState.WAITING_RESET then
@@ -1312,46 +1389,31 @@ local EggStealToggle = EggTab:Toggle({
                     currentStealState = StealState.IDLE
                     waitTime = 0.5
                 else
-                    if isCarryingEgg then
-                        if currentStealState ~= StealState.RETURNING and currentStealState ~= StealState.DEPOSITING then
-                            currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), tweenSpeed)
-                        end
-                    end
-
-                    refreshCarriedEggsCache()
-
+                    -- State machine for new logic
                     if currentStealState == StealState.IDLE then
-                        -- Skip if best egg is now carried by someone else
-                        if bestEggUid and carriedEggsCache[bestEggUid] then
-                            bestEggUid = nil
-                            targetEggUid = nil
-                            targetEggScore = nil
-                            collectionAttempts = 0
-                            cancelActiveTween()
-                            waitTime = 0.1
-                        elseif bestEggUid and trackedEggs[bestEggUid] then
-                            local data = trackedEggs[bestEggUid]
-                            local model = data.model
-                            if model and model.Parent then
-                                local bp = data.basePart or getModelBasePart(model)
-                                data.basePart = bp
-                                if bp then
-                                    targetEggUid = bestEggUid
-                                    targetEggScore = scoreEgg(data)
-                                    collectionAttempts = 0
-                                    currentStealState = StealState.MOVING_TO_EGG
-                                    tweenCharacterTo(bp.Position, tweenSpeed)
-                                end
+                        -- Find nearest egg and go collect it
+                        local nearestUid = findNearestEgg()
+                        if nearestUid and trackedEggs[nearestUid] then
+                            local data = trackedEggs[nearestUid]
+                            local bp = data.basePart or getModelBasePart(data.model)
+                            data.basePart = bp
+                            if bp then
+                                targetEggUid = nearestUid
+                                targetEggScore = nil
+                                collectionAttempts = 0
+                                currentStealState = StealState.MOVING_TO_EGG
+                                tweenCharacterTo(bp.Position, 240)
                             end
                         else
                             waitTime = 0.2
                         end
 
                     elseif currentStealState == StealState.MOVING_TO_EGG then
-                        if isCarryingEgg then
-                            currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), tweenSpeed)
+                        if carrying then
+                            -- Got the egg, switch to waiting mode
+                            currentStealState = StealState.WAITING
+                            cancelActiveTween()
+                            wasRagdolled = false
                         elseif not targetEggUid or not trackedEggs[targetEggUid] then
                             currentStealState = StealState.IDLE
                             cancelActiveTween()
@@ -1359,31 +1421,12 @@ local EggStealToggle = EggTab:Toggle({
                             targetEggScore = nil
                             collectionAttempts = 0
                         elseif carriedEggsCache[targetEggUid] then
-                            -- Target egg got picked up by someone else, find new target
                             currentStealState = StealState.IDLE
                             cancelActiveTween()
                             targetEggUid = nil
                             targetEggScore = nil
                             collectionAttempts = 0
-                            bestEggUid = nil
                             waitTime = 0.1
-                        elseif bestEggUid and bestEggUid ~= targetEggUid and trackedEggs[bestEggUid] then
-                            -- Check if new best egg is NOT carried by someone else
-                            if not carriedEggsCache[bestEggUid] then
-                                local newScore = scoreEgg(trackedEggs[bestEggUid])
-                                local now = tick()
-                                if (not targetEggScore or newScore > targetEggScore) and (now - lastTargetSwitchTime) > targetSwitchCooldown then
-                                    lastTargetSwitchTime = now
-                                    targetEggScore = newScore
-                                    targetEggUid = bestEggUid
-                                    local data = trackedEggs[bestEggUid]
-                                    local bp = data.basePart or getModelBasePart(data.model)
-                                    data.basePart = bp
-                                    if bp then
-                                        tweenCharacterTo(bp.Position, tweenSpeed)
-                                    end
-                                end
-                            end
                         else
                             local data = trackedEggs[targetEggUid]
                             local bp = data.basePart
@@ -1395,10 +1438,232 @@ local EggStealToggle = EggTab:Toggle({
                         end
 
                     elseif currentStealState == StealState.COLLECTING then
-                        if isCarryingEgg then
+                        if carrying then
                             collectionAttempts = 0
+                            currentStealState = StealState.WAITING
+                            cancelActiveTween()
+                            wasRagdolled = false
+                        elseif not targetEggUid or not trackedEggs[targetEggUid] then
+                            currentStealState = StealState.IDLE
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        else
+                            local data = trackedEggs[targetEggUid]
+                            local model = data.model
+                            local prompt = nil
+                            local promptPos = nil
+
+                            if model and model.Parent then
+                                prompt = getModelPrompt(model)
+                            end
+                            if not prompt then
+                                local bp = data.basePart or getModelBasePart(model)
+                                if bp then
+                                    prompt = findPromptNearPosition(bp.Position, 30)
+                                    if prompt and prompt.Parent then
+                                        promptPos = prompt.Parent.Position
+                                    end
+                                end
+                            elseif prompt and prompt.Parent then
+                                promptPos = prompt.Parent.Position
+                            end
+
+                            if prompt then
+                                collectionAttempts = collectionAttempts + 1
+                                if collectionAttempts <= maxCollectionAttempts then
+                                    local char = LocalPlayer.Character
+                                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                                    local canFire = true
+                                    if hrp and promptPos then
+                                        local dist = (hrp.Position - promptPos).Magnitude
+                                        canFire = dist <= (prompt.MaxActivationDistance + 5)
+                                    end
+
+                                    if canFire then
+                                        local now = tick()
+                                        if now - lastPromptFire >= promptFireInterval then
+                                            instantFirePrompt(prompt)
+                                            lastPromptFire = now
+                                        end
+                                    end
+                                    waitTime = 0.08
+                                else
+                                    currentStealState = StealState.IDLE
+                                    cancelActiveTween()
+                                    targetEggUid = nil
+                                    targetEggScore = nil
+                                    collectionAttempts = 0
+                                end
+                            else
+                                currentStealState = StealState.IDLE
+                                cancelActiveTween()
+                                targetEggUid = nil
+                                targetEggScore = nil
+                                collectionAttempts = 0
+                            end
+                        end
+
+                    elseif currentStealState == StealState.WAITING then
+                        -- Holding nearest egg, waiting for ragdoll or egg drop
+                        if ragdolled or not carrying then
+                            -- Player got ragdolled OR egg was dropped!
+                            -- Instantly rush to best egg at 5000 speed
+                            wasRagdolled = true
+                            rushMode = true
+                            currentStealState = StealState.RAGDOLLED_RUSH
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        end
+
+                    elseif currentStealState == StealState.RAGDOLLED_RUSH then
+                        if rushMode and carrying then
+                            -- Rush mode active and we collected the best egg - fast return at 5000
+                            rushMode = false
                             currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), tweenSpeed)
+                            tweenCharacterTo(getReturnPosition(), 5000)
+                        elseif rushMode then
+                            -- Rush mode active - must collect best egg at 5000 speed
+                            refreshCarriedEggsCache()
+                            local bestUid = findBestEgg()
+                            if bestUid and trackedEggs[bestUid] then
+                                if bestUid ~= targetEggUid then
+                                    targetEggUid = bestUid
+                                    collectionAttempts = 0
+                                    local data = trackedEggs[bestUid]
+                                    local bp = data.basePart or getModelBasePart(data.model)
+                                    data.basePart = bp
+                                    if bp then
+                                        tweenCharacterTo(bp.Position, 5000)
+                                    end
+                                else
+                                    local data = trackedEggs[targetEggUid]
+                                    local bp = data.basePart or getModelBasePart(data.model)
+                                    data.basePart = bp
+                                    if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                                        cancelActiveTween()
+                                        collectionAttempts = 0
+                                        currentStealState = StealState.COLLECTING_BEST
+                                    elseif not data.model or not data.model.Parent then
+                                        targetEggUid = nil
+                                        collectionAttempts = 0
+                                    end
+                                end
+                            else
+                                -- No best egg available, just wait
+                                waitTime = 0.05
+                            end
+                        elseif not ragdolled and carrying then
+                            -- Normal flow: unragdolled and carrying - return at 240
+                            currentStealState = StealState.RETURNING
+                            tweenCharacterTo(getReturnPosition(), 240)
+                        elseif not ragdolled then
+                            -- Normal flow: unragdolled but not carrying - collect best at 240
+                            currentStealState = StealState.MOVING_TO_BEST
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        elseif carrying then
+                            -- Normal flow: ragdolled and carrying - fast return at 5000
+                            currentStealState = StealState.RETURNING
+                            tweenCharacterTo(getReturnPosition(), 5000)
+                        else
+                            -- Normal flow: ragdolled and not carrying - rush to best at 5000
+                            refreshCarriedEggsCache()
+                            local bestUid = findBestEgg()
+                            if bestUid and trackedEggs[bestUid] then
+                                if bestUid ~= targetEggUid then
+                                    targetEggUid = bestUid
+                                    collectionAttempts = 0
+                                    local data = trackedEggs[bestUid]
+                                    local bp = data.basePart or getModelBasePart(data.model)
+                                    data.basePart = bp
+                                    if bp then
+                                        tweenCharacterTo(bp.Position, 5000)
+                                    end
+                                else
+                                    local data = trackedEggs[targetEggUid]
+                                    local bp = data.basePart or getModelBasePart(data.model)
+                                    data.basePart = bp
+                                    if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                                        cancelActiveTween()
+                                        collectionAttempts = 0
+                                        currentStealState = StealState.COLLECTING_BEST
+                                    elseif not data.model or not data.model.Parent then
+                                        targetEggUid = nil
+                                        collectionAttempts = 0
+                                    end
+                                end
+                            else
+                                -- No best egg available, just wait
+                                waitTime = 0.05
+                            end
+                        end
+
+                    elseif currentStealState == StealState.MOVING_TO_BEST then
+                        if ragdolled then
+                            -- Ragdolled again, go back to rush mode
+                            rushMode = false
+                            currentStealState = StealState.RAGDOLLED_RUSH
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        elseif carrying then
+                            -- Got the best egg, return to safe zone at 240
+                            rushMode = false
+                            currentStealState = StealState.RETURNING
+                            tweenCharacterTo(getReturnPosition(), 1000)
+                        elseif not targetEggUid or not trackedEggs[targetEggUid] then
+                            -- Find best egg
+                            local bestUid = findBestEgg()
+                            if bestUid and trackedEggs[bestUid] then
+                                targetEggUid = bestUid
+                                local data = trackedEggs[bestUid]
+                                local bp = data.basePart or getModelBasePart(data.model)
+                                data.basePart = bp
+                                if bp then
+                                    tweenCharacterTo(bp.Position, 1000)
+                                end
+                            else
+                                currentStealState = StealState.IDLE
+                                cancelActiveTween()
+                                targetEggUid = nil
+                                targetEggScore = nil
+                                collectionAttempts = 0
+                            end
+                        elseif carriedEggsCache[targetEggUid] then
+                            currentStealState = StealState.IDLE
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        else
+                            local data = trackedEggs[targetEggUid]
+                            local bp = data.basePart
+                            if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                                cancelActiveTween()
+                                collectionAttempts = 0
+                                currentStealState = StealState.COLLECTING_BEST
+                            end
+                        end
+
+                    elseif currentStealState == StealState.COLLECTING_BEST then
+                        if ragdolled then
+                            currentStealState = StealState.RAGDOLLED_RUSH
+                            cancelActiveTween()
+                            targetEggUid = nil
+                            targetEggScore = nil
+                            collectionAttempts = 0
+                        elseif carrying then
+                            collectionAttempts = 0
+                            rushMode = false
+                            currentStealState = StealState.RETURNING
+                            tweenCharacterTo(getReturnPosition(), 1000)
                         elseif not targetEggUid or not trackedEggs[targetEggUid] then
                             currentStealState = StealState.IDLE
                             cancelActiveTween()
@@ -1462,25 +1727,29 @@ local EggStealToggle = EggTab:Toggle({
                         end
 
                     elseif currentStealState == StealState.RETURNING then
-                        if not isCarryingEgg then
+                        if not carrying then
                             cancelActiveTween()
                             currentStealState = StealState.IDLE
                             targetEggUid = nil
                             targetEggScore = nil
                             collectionAttempts = 0
                             resetCarryDetection()
+                            wasRagdolled = false
+                            rushMode = false
                         elseif isAtPosition(getReturnPosition(), 12) then
                             cancelActiveTween()
                             currentStealState = StealState.DEPOSITING
                         end
 
                     elseif currentStealState == StealState.DEPOSITING then
-                        if not isCarryingEgg then
+                        if not carrying then
                             currentStealState = StealState.IDLE
                             targetEggUid = nil
                             targetEggScore = nil
                             collectionAttempts = 0
                             resetCarryDetection()
+                            wasRagdolled = false
+                            rushMode = false
                         end
                     end
                 end
@@ -1495,12 +1764,13 @@ local EggStealToggle = EggTab:Toggle({
             targetEggScore = nil
             collectionAttempts = 0
             resetCarryDetection()
+            wasRagdolled = false
+            rushMode = false
         end)
     end,
 })
-RunService.RenderStepped:Connect(function()
-    if espEnabled then updateBeam() end
-end)
+    if espEnabled then updateBeam()
+end
 
 LocalPlayer.CharacterAdded:Connect(function()
     if espEnabled then
@@ -1517,6 +1787,7 @@ LocalPlayer.CharacterAdded:Connect(function()
         targetEggScore = nil
         collectionAttempts = 0
         isCarryingEgg = false
+        rushMode = false
     end
     if bigOnlyAutoStealEnabled then
         cancelActiveTween()
@@ -1543,6 +1814,22 @@ local SpeedInput = MainTab:Input({
     end,
 })
 
+local SpeedBypassDropdown = MainTab:Dropdown({
+    Title = "Speed Bypass Method",
+    Desc = "Choose which bypass method to use for speed.",
+    Icon = "settings-2",
+    Values = {"Humanoid Clone", "GC Hook Bypass"},
+    Value = SpeedBypassMethod,
+    Callback = function(value)
+        SpeedBypassMethod = value
+        Memory.SpeedBypassMethod = value
+        if SpeedEnabled then
+            stopNewBypass()
+            task.wait(0.1)
+            startNewBypass()
+        end
+    end,
+})
 
 local SpeedToggle = MainTab:Toggle({
     Title = "Speed Hack",
@@ -1711,8 +1998,8 @@ AutoSellTab:Section({ Title = "Auto Sell", Icon = "tag", Opened = true })
 
 local RarityOptions = {
     "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic",
-    "Divine", "Secret", "Prismatic", "Eternal", "Transcendent",
-    "Titan", "Celestial", "Cosmic"
+    "Cosmic", "Secret", "Prismatic", "Eternal", "Transcendent",
+    "Divine", "Celestial", "Titan"
 }
 
 local SellRarityDropdown = AutoSellTab:Dropdown({
@@ -1784,6 +2071,130 @@ SettingsTab:Paragraph({
 
 local newBypassConnections = {}
 local newBypassCharConnection = nil
+
+-- ===================== GC HOOK BYPASS =====================
+local GCHookBypass = {
+    RunService = RunService,
+    Players = Players,
+    speedconn = nil,
+    hookedfunc3 = nil,
+}
+
+function GCHookBypass:collectgarbage()
+    local s, r = pcall(function(...)
+        return getgc()
+    end)
+    if s and r then
+        return r    
+    end
+    return warn("failed to get garbage: "..tostring(r))
+end
+
+function GCHookBypass:safehook(f, c)
+    local s, r = pcall(function(...)
+        return hookfunction(f, newlclosure(c))
+    end)
+    if s and r then
+        return r    
+    end
+    return warn("failed to hook function: "..tostring(r))
+end
+
+function GCHookBypass:findfunction(nups, linedefined)
+    local s, r = pcall(function(...)
+        for _, f in next, self:collectgarbage() do
+            if typeof(f) == 'function' and islclosure(f) then
+                local upvs = debug.getupvalues(f)
+                local line = debug.info(f, "l")
+
+                if upvs and #upvs == nups and line == linedefined then
+                    if nups == 10 then
+                        local t = debug.getupvalue(f, 3)
+                        if typeof(t) == "table" and rawget(t, "Humanoid") then
+                            return f
+                        end
+                    else
+                        return f
+                    end
+                end
+            end
+        end
+        return nil
+    end)
+    if s and r then
+        return r
+    end
+    return nil
+end
+
+function GCHookBypass:init()
+    self.LocalPlayer = self.Players.LocalPlayer
+    if not self.LocalPlayer then
+        return warn("failed to get localplayer")
+    end
+
+    if not getgc then
+        self.LocalPlayer:Kick("UNSUPPORT EXECUTOR MISSING getgc")
+    end
+
+    if not hookfunction then
+        self.LocalPlayer:Kick("UNSUPPORT EXECUTOR MISSING hookfunction")
+    end
+
+    if not islclosure then
+        self.LocalPlayer:Kick("UNSUPPORT EXECUTOR MISSING islclosure")
+    end
+
+    local func3 = self:findfunction(19, 3)
+    if not func3 then
+        return warn("failed to get function 3")
+    end
+
+    local v7 = debug.getupvalue(func3, 2)
+    if not v7 then
+        return warn("failed to get v7")
+    end
+
+    self.hookedfunc3 = self:safehook(v7, function(p1, p2)
+        if p2 and typeof(p2) == "table" then
+            setmetatable(p2, {})
+        end
+        return self.hookedfunc3(p1,p2)
+    end)
+
+    self.speedconn = self.RunService.Heartbeat:Connect(function()
+        local char = self.LocalPlayer.Character
+        if not char then 
+            return
+        end
+        local hum = char:FindFirstChild("Humanoid")
+        if not hum then 
+            return
+        end
+        hum.WalkSpeed = DesiredSpeed
+    end)
+
+    warn("[GC Hook Bypass] Initialized")
+    return true
+end
+
+function GCHookBypass:stop()
+    if self.speedconn then
+        pcall(function() self.speedconn:Disconnect() end)
+        self.speedconn = nil
+    end
+    warn("[GC Hook Bypass] Stopped")
+end
+
+local function startGCHookBypass()
+    GCHookBypass:init()
+end
+
+local function stopGCHookBypass()
+    GCHookBypass:stop()
+end
+
+-- ===================== HUMANOID CLONE BYPASS =====================
 
 local function forceWalkSpeedNewBypass(humanoid)
     if newBypassConnections[humanoid] then
@@ -1881,7 +2292,7 @@ local function setupNewBypass(character)
     applyNewBypass(character)
 end
 
-local function startNewBypass()
+local function startHumanoidCloneBypass()
     if newBypassCharConnection then
         pcall(function() newBypassCharConnection:Disconnect() end)
     end
@@ -1895,7 +2306,7 @@ local function startNewBypass()
     end
 end
 
-local function stopNewBypass()
+local function stopHumanoidCloneBypass()
     for hum, conn in pairs(newBypassConnections) do
         pcall(function() conn:Disconnect() end)
     end
@@ -1903,6 +2314,22 @@ local function stopNewBypass()
     if newBypassCharConnection then
         pcall(function() newBypassCharConnection:Disconnect() end)
         newBypassCharConnection = nil
+    end
+end
+
+local function startNewBypass()
+    if SpeedBypassMethod == "GC Hook Bypass" then
+        startGCHookBypass()
+    else
+        startHumanoidCloneBypass()
+    end
+end
+
+local function stopNewBypass()
+    if SpeedBypassMethod == "GC Hook Bypass" then
+        stopGCHookBypass()
+    else
+        stopHumanoidCloneBypass()
     end
 end
 
@@ -2319,11 +2746,9 @@ if DiabloUsersFolder then
     end)
 end
 
--- ===================== BAT AURA SYSTEM =====================
 local batAuraConnection = nil
 local batAuraLastSwing = 0
 
--- References (re-init friendly)
 local BatAuraSwingRemote = nil
 local BatAuraToolGameplayGuard = nil
 
@@ -2481,7 +2906,6 @@ if SpeedEnabled then
     startNewBypass()
 end
 
--- ===================== AUTO SELL SYSTEM =====================
 local AutoSellUtility = {
     ReplicatedStorage = game:GetService("ReplicatedStorage")
 }
