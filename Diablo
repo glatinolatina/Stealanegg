@@ -1099,108 +1099,444 @@ local function isAreaSealed()
     return false
 end
 
+local function findBiggestEgg()
+    refreshCarriedEggsCache()
+    local biggestUid, biggestSize = nil, -1
+    for uid, data in pairs(trackedEggs) do
+        if data.model and data.model.Parent then
+            if carriedEggsCache[uid] then continue end
+            local size = getModelSizeScore(data.model)
+            if size > biggestSize then
+                biggestSize = size
+                biggestUid = uid
+            end
+        end
+    end
+    return biggestUid, biggestSize
+end
+
+local function findNearestBigEgg()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local playerPos = hrp.Position
+    local nearestUid, nearestDist = nil, math.huge
+
+    refreshCarriedEggsCache()
+
+    for uid, data in pairs(trackedEggs) do
+        if data.model and data.model.Parent then
+            if carriedEggsCache[uid] then continue end
+            local bp = data.basePart or getModelBasePart(data.model)
+            if bp then
+                local dist = (playerPos - bp.Position).Magnitude
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearestUid = uid
+                end
+            end
+        end
+    end
+    return nearestUid, nearestDist
+end
+
+local isPlayerRagdolled
+
 local function runBigOnlyAutoSteal()
-    local targetUid = nil
-    local collectionAttempts = 0
-    local maxCollectionAttempts = 20
-    local lastPromptFire = 0
-    local promptFireInterval = 0.08
+    local bigTargetUid = nil
+    local bigTargetScore = nil
+    local bigCollectionAttempts = 0
+    local bigMaxCollectionAttempts = 20
+    local bigLastPromptFire = 0
+    local bigPromptFireInterval = 0.08
+    local bigRushMode = false
+    local bigCurrentState = StealState.IDLE
 
     while bigOnlyAutoStealEnabled do
+        local waitTime = 0.03
+
         syncEggs()
+
         local carrying = checkCarryingEgg()
+        local ragdolled = isPlayerRagdolled()
 
         if isAreaSealed() then
-            cancelActiveTween()
-            task.wait(0.3)
-        elseif carrying then
-            if not isAtPosition(getReturnPosition(), 15) then
-                tweenCharacterTo(getReturnPosition(), tweenSpeed)
-                while bigOnlyAutoStealEnabled and checkCarryingEgg() and not isAtPosition(getReturnPosition(), 12) do
-                    task.wait(0.05)
-                end
-            else
-                while bigOnlyAutoStealEnabled and checkCarryingEgg() do
-                    task.wait(0.05)
-                end
+            if bigCurrentState ~= StealState.WAITING_RESET then
+                bigCurrentState = StealState.WAITING_RESET
+                cancelActiveTween()
             end
-            resetCarryDetection()
-            targetUid = nil
-            collectionAttempts = 0
+            waitTime = 0.3
+        elseif bigCurrentState == StealState.WAITING_RESET then
+            bigCurrentState = StealState.IDLE
+            waitTime = 0.5
         else
-            refreshCarriedEggsCache()
-            -- Find the single biggest egg on the map (not carried by others)
-            local biggestUid, biggestSize = nil, -1
-            for uid, data in pairs(trackedEggs) do
-                if data.model and data.model.Parent then
-                    if carriedEggsCache[uid] then continue end
-                    local size = getModelSizeScore(data.model)
-                    if size > biggestSize then
-                        biggestSize = size
-                        biggestUid = uid
-                    end
-                end
-            end
-
-            if biggestUid then
-                if biggestUid ~= targetUid then
-                    targetUid = biggestUid
-                    collectionAttempts = 0
-                    local data = trackedEggs[biggestUid]
+            -- State machine for big eggs
+            if bigCurrentState == StealState.IDLE then
+                -- Find nearest big egg and go collect it
+                local nearestUid = findNearestBigEgg()
+                if nearestUid and trackedEggs[nearestUid] then
+                    local data = trackedEggs[nearestUid]
                     local bp = data.basePart or getModelBasePart(data.model)
                     data.basePart = bp
                     if bp then
-                        tweenCharacterTo(bp.Position, tweenSpeed)
+                        bigTargetUid = nearestUid
+                        bigTargetScore = nil
+                        bigCollectionAttempts = 0
+                        bigCurrentState = StealState.MOVING_TO_EGG
+                        tweenCharacterTo(bp.Position, 240)
                     end
                 else
-                    local data = trackedEggs[targetUid]
-                    local bp = data.basePart or getModelBasePart(data.model)
-                    data.basePart = bp
+                    waitTime = 0.2
+                end
+
+            elseif bigCurrentState == StealState.MOVING_TO_EGG then
+                if carrying then
+                    bigCurrentState = StealState.WAITING
+                    cancelActiveTween()
+                    bigRushMode = false
+                elseif not bigTargetUid or not trackedEggs[bigTargetUid] then
+                    bigCurrentState = StealState.IDLE
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                elseif carriedEggsCache[bigTargetUid] then
+                    bigCurrentState = StealState.IDLE
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                    waitTime = 0.1
+                else
+                    local data = trackedEggs[bigTargetUid]
+                    local bp = data.basePart
                     if bp and bp.Parent and isAtPosition(bp.Position, 8) then
                         cancelActiveTween()
-                        local model = data.model
-                        local prompt = nil
-                        if model and model.Parent then
-                            prompt = getModelPrompt(model)
-                        end
-                        if not prompt then
-                            prompt = findPromptNearPosition(bp.Position, 30)
-                        end
-                        if prompt then
-                            collectionAttempts = collectionAttempts + 1
-                            if collectionAttempts <= maxCollectionAttempts then
-                                local now = tick()
-                                if now - lastPromptFire >= promptFireInterval then
-                                    instantFirePrompt(prompt)
-                                    lastPromptFire = now
-                                end
-                                task.wait(0.08)
-                            else
-                                targetUid = nil
-                                collectionAttempts = 0
-                            end
-                        else
-                            targetUid = nil
-                            collectionAttempts = 0
-                        end
-                    elseif not data.model or not data.model.Parent then
-                        targetUid = nil
-                        collectionAttempts = 0
+                        bigCollectionAttempts = 0
+                        bigCurrentState = StealState.COLLECTING
                     end
                 end
-            else
-                targetUid = nil
-                collectionAttempts = 0
-                task.wait(0.2)
+
+            elseif bigCurrentState == StealState.COLLECTING then
+                if carrying then
+                    bigCollectionAttempts = 0
+                    bigCurrentState = StealState.WAITING
+                    cancelActiveTween()
+                    bigRushMode = false
+                elseif not bigTargetUid or not trackedEggs[bigTargetUid] then
+                    bigCurrentState = StealState.IDLE
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                else
+                    local data = trackedEggs[bigTargetUid]
+                    local model = data.model
+                    local prompt = nil
+                    local promptPos = nil
+
+                    if model and model.Parent then
+                        prompt = getModelPrompt(model)
+                    end
+                    if not prompt then
+                        local bp = data.basePart or getModelBasePart(model)
+                        if bp then
+                            prompt = findPromptNearPosition(bp.Position, 30)
+                            if prompt and prompt.Parent then
+                                promptPos = prompt.Parent.Position
+                            end
+                        end
+                    elseif prompt and prompt.Parent then
+                        promptPos = prompt.Parent.Position
+                    end
+
+                    if prompt then
+                        bigCollectionAttempts = bigCollectionAttempts + 1
+                        if bigCollectionAttempts <= bigMaxCollectionAttempts then
+                            local char = LocalPlayer.Character
+                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                            local canFire = true
+                            if hrp and promptPos then
+                                local dist = (hrp.Position - promptPos).Magnitude
+                                canFire = dist <= (prompt.MaxActivationDistance + 5)
+                            end
+
+                            if canFire then
+                                local now = tick()
+                                if now - bigLastPromptFire >= bigPromptFireInterval then
+                                    instantFirePrompt(prompt)
+                                    bigLastPromptFire = now
+                                end
+                            end
+                            waitTime = 0.08
+                        else
+                            bigCurrentState = StealState.IDLE
+                            cancelActiveTween()
+                            bigTargetUid = nil
+                            bigTargetScore = nil
+                            bigCollectionAttempts = 0
+                        end
+                    else
+                        bigCurrentState = StealState.IDLE
+                        cancelActiveTween()
+                        bigTargetUid = nil
+                        bigTargetScore = nil
+                        bigCollectionAttempts = 0
+                    end
+                end
+
+            elseif bigCurrentState == StealState.WAITING then
+                -- Holding nearest big egg, waiting for ragdoll or egg drop
+                if ragdolled or not carrying then
+                    -- Player got ragdolled OR egg was dropped!
+                    -- Instantly rush to biggest egg at 5000 speed
+                    bigRushMode = true
+                    bigCurrentState = StealState.RAGDOLLED_RUSH
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                end
+
+            elseif bigCurrentState == StealState.RAGDOLLED_RUSH then
+                if bigRushMode and carrying then
+                    -- Rush mode active and we collected the biggest egg - fast return at 5000
+                    bigRushMode = false
+                    bigCurrentState = StealState.RETURNING
+                    tweenCharacterTo(getReturnPosition(), 1000)
+                elseif bigRushMode then
+                    -- Rush mode active - must collect biggest egg at 5000 speed
+                    refreshCarriedEggsCache()
+                    local bestUid = findBiggestEgg()
+                    if bestUid and trackedEggs[bestUid] then
+                        if bestUid ~= bigTargetUid then
+                            bigTargetUid = bestUid
+                            bigCollectionAttempts = 0
+                            local data = trackedEggs[bestUid]
+                            local bp = data.basePart or getModelBasePart(data.model)
+                            data.basePart = bp
+                            if bp then
+                                tweenCharacterTo(bp.Position, 5000)
+                            end
+                        else
+                            local data = trackedEggs[bigTargetUid]
+                            local bp = data.basePart or getModelBasePart(data.model)
+                            data.basePart = bp
+                            if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                                cancelActiveTween()
+                                bigCollectionAttempts = 0
+                                bigCurrentState = StealState.COLLECTING_BEST
+                            elseif not data.model or not data.model.Parent then
+                                bigTargetUid = nil
+                                bigCollectionAttempts = 0
+                            end
+                        end
+                    else
+                        waitTime = 0.05
+                    end
+                elseif not ragdolled and carrying then
+                    -- Normal flow: unragdolled and carrying - return at 240
+                    bigCurrentState = StealState.RETURNING
+                    tweenCharacterTo(getReturnPosition(), 1000)
+                elseif not ragdolled then
+                    -- Normal flow: unragdolled but not carrying - collect biggest at 240
+                    bigCurrentState = StealState.MOVING_TO_BEST
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                elseif carrying then
+                    -- Normal flow: ragdolled and carrying - fast return at 5000
+                    bigCurrentState = StealState.RETURNING
+                    tweenCharacterTo(getReturnPosition(), 1000)
+                else
+                    -- Normal flow: ragdolled and not carrying - rush to biggest at 5000
+                    refreshCarriedEggsCache()
+                    local bestUid = findBiggestEgg()
+                    if bestUid and trackedEggs[bestUid] then
+                        if bestUid ~= bigTargetUid then
+                            bigTargetUid = bestUid
+                            bigCollectionAttempts = 0
+                            local data = trackedEggs[bestUid]
+                            local bp = data.basePart or getModelBasePart(data.model)
+                            data.basePart = bp
+                            if bp then
+                                tweenCharacterTo(bp.Position, 5000)
+                            end
+                        else
+                            local data = trackedEggs[bigTargetUid]
+                            local bp = data.basePart or getModelBasePart(data.model)
+                            data.basePart = bp
+                            if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                                cancelActiveTween()
+                                bigCollectionAttempts = 0
+                                bigCurrentState = StealState.COLLECTING_BEST
+                            elseif not data.model or not data.model.Parent then
+                                bigTargetUid = nil
+                                bigCollectionAttempts = 0
+                            end
+                        end
+                    else
+                        waitTime = 0.05
+                    end
+                end
+
+            elseif bigCurrentState == StealState.MOVING_TO_BEST then
+                if ragdolled then
+                    bigRushMode = false
+                    bigCurrentState = StealState.RAGDOLLED_RUSH
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                elseif carrying then
+                    bigRushMode = false
+                    bigCurrentState = StealState.RETURNING
+                    tweenCharacterTo(getReturnPosition(), 1000)
+                elseif not bigTargetUid or not trackedEggs[bigTargetUid] then
+                    local bestUid = findBiggestEgg()
+                    if bestUid and trackedEggs[bestUid] then
+                        bigTargetUid = bestUid
+                        local data = trackedEggs[bestUid]
+                        local bp = data.basePart or getModelBasePart(data.model)
+                        data.basePart = bp
+                        if bp then
+                            tweenCharacterTo(bp.Position, 240)
+                        end
+                    else
+                        bigCurrentState = StealState.IDLE
+                        cancelActiveTween()
+                        bigTargetUid = nil
+                        bigTargetScore = nil
+                        bigCollectionAttempts = 0
+                    end
+                elseif carriedEggsCache[bigTargetUid] then
+                    bigCurrentState = StealState.IDLE
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                else
+                    local data = trackedEggs[bigTargetUid]
+                    local bp = data.basePart
+                    if bp and bp.Parent and isAtPosition(bp.Position, 8) then
+                        cancelActiveTween()
+                        bigCollectionAttempts = 0
+                        bigCurrentState = StealState.COLLECTING_BEST
+                    end
+                end
+
+            elseif bigCurrentState == StealState.COLLECTING_BEST then
+                if ragdolled then
+                    bigCurrentState = StealState.RAGDOLLED_RUSH
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                elseif carrying then
+                    bigCollectionAttempts = 0
+                    bigRushMode = false
+                    bigCurrentState = StealState.RETURNING
+                    tweenCharacterTo(getReturnPosition(), 1000)
+                elseif not bigTargetUid or not trackedEggs[bigTargetUid] then
+                    bigCurrentState = StealState.IDLE
+                    cancelActiveTween()
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                else
+                    local data = trackedEggs[bigTargetUid]
+                    local model = data.model
+                    local prompt = nil
+                    local promptPos = nil
+
+                    if model and model.Parent then
+                        prompt = getModelPrompt(model)
+                    end
+                    if not prompt then
+                        local bp = data.basePart or getModelBasePart(model)
+                        if bp then
+                            prompt = findPromptNearPosition(bp.Position, 30)
+                            if prompt and prompt.Parent then
+                                promptPos = prompt.Parent.Position
+                            end
+                        end
+                    elseif prompt and prompt.Parent then
+                        promptPos = prompt.Parent.Position
+                    end
+
+                    if prompt then
+                        bigCollectionAttempts = bigCollectionAttempts + 1
+                        if bigCollectionAttempts <= bigMaxCollectionAttempts then
+                            local char = LocalPlayer.Character
+                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                            local canFire = true
+                            if hrp and promptPos then
+                                local dist = (hrp.Position - promptPos).Magnitude
+                                canFire = dist <= (prompt.MaxActivationDistance + 5)
+                            end
+
+                            if canFire then
+                                local now = tick()
+                                if now - bigLastPromptFire >= bigPromptFireInterval then
+                                    instantFirePrompt(prompt)
+                                    bigLastPromptFire = now
+                                end
+                            end
+                            waitTime = 0.08
+                        else
+                            bigCurrentState = StealState.IDLE
+                            cancelActiveTween()
+                            bigTargetUid = nil
+                            bigTargetScore = nil
+                            bigCollectionAttempts = 0
+                        end
+                    else
+                        bigCurrentState = StealState.IDLE
+                        cancelActiveTween()
+                        bigTargetUid = nil
+                        bigTargetScore = nil
+                        bigCollectionAttempts = 0
+                    end
+                end
+
+            elseif bigCurrentState == StealState.RETURNING then
+                if not carrying then
+                    cancelActiveTween()
+                    bigCurrentState = StealState.IDLE
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                    resetCarryDetection()
+                    bigRushMode = false
+                elseif isAtPosition(getReturnPosition(), 12) then
+                    cancelActiveTween()
+                    bigCurrentState = StealState.DEPOSITING
+                end
+
+            elseif bigCurrentState == StealState.DEPOSITING then
+                if not carrying then
+                    bigCurrentState = StealState.IDLE
+                    bigTargetUid = nil
+                    bigTargetScore = nil
+                    bigCollectionAttempts = 0
+                    resetCarryDetection()
+                    bigRushMode = false
+                end
             end
         end
 
-        task.wait(0.03)
+        task.wait(waitTime)
     end
 
     bigOnlyLoopRunning = false
     cancelActiveTween()
+    bigCurrentState = StealState.IDLE
+    bigTargetUid = nil
+    bigTargetScore = nil
+    bigCollectionAttempts = 0
     resetCarryDetection()
+    bigRushMode = false
 end
 
 
@@ -1244,13 +1580,18 @@ local EggBigOnlyToggle = EggTab:Toggle({
             bigOnlyAutoStealEnabled = false
             cancelActiveTween()
             resetCarryDetection()
+            bigCurrentState = StealState.IDLE
+            bigTargetUid = nil
+            bigTargetScore = nil
+            bigCollectionAttempts = 0
+            bigRushMode = false
         end
 
         syncEggs()
     end,
 })
 
-local function isPlayerRagdolled()
+isPlayerRagdolled = function()
     local char = LocalPlayer.Character
     if not char then return true end
     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1524,7 +1865,7 @@ local EggStealToggle = EggTab:Toggle({
                             -- Rush mode active and we collected the best egg - fast return at 5000
                             rushMode = false
                             currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), 5000)
+                            tweenCharacterTo(getReturnPosition(), 1000)
                         elseif rushMode then
                             -- Rush mode active - must collect best egg at 5000 speed
                             refreshCarriedEggsCache()
@@ -1559,7 +1900,7 @@ local EggStealToggle = EggTab:Toggle({
                         elseif not ragdolled and carrying then
                             -- Normal flow: unragdolled and carrying - return at 240
                             currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), 240)
+                            tweenCharacterTo(getReturnPosition(), 1000)
                         elseif not ragdolled then
                             -- Normal flow: unragdolled but not carrying - collect best at 240
                             currentStealState = StealState.MOVING_TO_BEST
@@ -1570,7 +1911,7 @@ local EggStealToggle = EggTab:Toggle({
                         elseif carrying then
                             -- Normal flow: ragdolled and carrying - fast return at 5000
                             currentStealState = StealState.RETURNING
-                            tweenCharacterTo(getReturnPosition(), 5000)
+                            tweenCharacterTo(getReturnPosition(), 1000)
                         else
                             -- Normal flow: ragdolled and not carrying - rush to best at 5000
                             refreshCarriedEggsCache()
@@ -1627,7 +1968,7 @@ local EggStealToggle = EggTab:Toggle({
                                 local bp = data.basePart or getModelBasePart(data.model)
                                 data.basePart = bp
                                 if bp then
-                                    tweenCharacterTo(bp.Position, 1000)
+                                    tweenCharacterTo(bp.Position, 240)
                                 end
                             else
                                 currentStealState = StealState.IDLE
@@ -1791,6 +2132,11 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
     if bigOnlyAutoStealEnabled then
         cancelActiveTween()
+        bigCurrentState = StealState.IDLE
+        bigTargetUid = nil
+        bigTargetScore = nil
+        bigCollectionAttempts = 0
+        bigRushMode = false
     end
 end)
 
