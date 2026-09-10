@@ -3341,3 +3341,42 @@ function AutoSellUtility:init()
 end
 
 AutoSellUtility:init()
+
+wait(5)
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Guardamos la posición original de las articulaciones
+local joints = {}
+for _, joint in pairs(character:GetDescendants()) do
+	if joint:IsA("Motor6D") then
+		joints[joint.Name] = {Part0 = joint.Part0, Part1 = joint.Part1, C0 = joint.C0, C1 = joint.C1}
+	end
+end
+
+-- Función para restaurar joints
+local function restoreJoints()
+	for name, data in pairs(joints) do
+		if data.Part0:FindFirstChild(name) == nil then
+			local joint = Instance.new("Motor6D")
+			joint.Name = name
+			joint.Part0 = data.Part0
+			joint.Part1 = data.Part1
+			joint.C0 = data.C0
+			joint.C1 = data.C1
+			joint.Parent = data.Part0
+		end
+	end
+end
+
+-- Previene la caída (ragdoll) cada frame
+game:GetService("RunService").RenderStepped:Connect(function()
+	if humanoid:GetState() == Enum.HumanoidStateType.Physics or
+	   humanoid:GetState() == Enum.HumanoidStateType.Freefall or
+	   humanoid:GetState() == Enum.HumanoidStateType.Seated then
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+		restoreJoints()
+	end
+end)
