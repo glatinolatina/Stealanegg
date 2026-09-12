@@ -174,7 +174,7 @@
         Memory = {
             SpeedEnabled = true,
             DesiredSpeed = 500,
-            SpeedBypassMethod = "GC Hook Bypass",
+            SpeedBypassMethod = "Humanoid Clone",
             AntiKnockbackEnabled = false,
             AntiRagdollEnabled = false,
             InstantAccelerationEnabled = false,
@@ -191,6 +191,9 @@
             AutoSellRarities = {"Common", "Uncommon", "Rare", "Epic"},
             AutoStealSpeed = 1000,
             AutoTreadmillEnabled = false,
+            PendingReportRequest = "",
+            EggWebhookUrl = "",
+            EggWebhookEnabled = false,
         }
         getgenv().MergedUtilityMemory = Memory
     end
@@ -198,7 +201,7 @@
     _G.DiabloState = _G.DiabloState or {}
     _G.DiabloState.DesiredSpeed = Memory.DesiredSpeed or 500
     _G.DiabloState.SpeedEnabled = Memory.SpeedEnabled or false
-    _G.DiabloState.SpeedBypassMethod = Memory.SpeedBypassMethod or "GC Hook Bypass"
+    _G.DiabloState.SpeedBypassMethod = Memory.SpeedBypassMethod or "Humanoid Clone"
     _G.DiabloState.AntiKnockbackEnabled = Memory.AntiKnockbackEnabled or false
     _G.DiabloState.AntiRagdollEnabled = Memory.AntiRagdollEnabled or false
     _G.DiabloState.InstantAccelerationEnabled = Memory.InstantAccelerationEnabled or false
@@ -211,6 +214,8 @@
     _G.DiabloState.AutoSellRarities = Memory.AutoSellRarities or {"Common", "Uncommon", "Rare", "Epic"}
     _G.DiabloState.AutoStealSpeed = math.clamp(tonumber(Memory.AutoStealSpeed) or 1000, 100, 1000)
     _G.DiabloState.AutoTreadmillEnabled = Memory.AutoTreadmillEnabled == true
+    _G.DiabloState.EggWebhookUrl = tostring(Memory.EggWebhookUrl or "")
+    _G.DiabloState.EggWebhookEnabled = Memory.EggWebhookEnabled == true
     _G.DiabloState.FlyBodyVelocity = nil
     _G.DiabloState.FlyBodyGyro = nil
     _G.DiabloState.FlyConnection = nil
@@ -317,9 +322,48 @@
 
     local MainTab = Window:Tab({ Title = "Main", Icon = "layout-dashboard" })
     local EggTab = Window:Tab({ Title = "Egg Steal", Icon = "egg" })
+    local WebhookTab = Window:Tab({ Title = "Webhook", Icon = "webhook" })
     local AdjustTab = Window:Tab({ Title = "Adjust", Icon = "sliders-horizontal" })
     local AutoSellTab = Window:Tab({ Title = "Auto Sell", Icon = "tag" })
     local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
+
+    WebhookTab:Section({ Title = "Egg Watcher", Icon = "egg", Opened = true })
+
+    WebhookTab:Paragraph({
+        Title = "How Egg Watcher Works",
+        Desc = "Tracks newly spawned eggs and ignores Common through Cosmic. Only Secret, Prismatic, Eternal, Transcendent, Divine, Celestial, and Titan are sent to your Discord webhook. Every alert uses a modern Discord embed with a unique rarity accent; Secret uses black. When Diablo targets the tracked egg, the webhook follows up with whether it was collected or missed, while keeping the original spawn time.",
+        Icon = "info",
+    })
+
+    WebhookTab:Input({
+        Title = "Egg Webhook URL",
+        Desc = "Paste the Discord webhook that should receive egg alerts.",
+        InputIcon = "link",
+        Value = _G.DiabloState.EggWebhookUrl,
+        Placeholder = "https://discord.com/api/webhooks/...",
+        Callback = function(value)
+            _G.DiabloState.EggWebhookUrl = tostring(value or "")
+            Memory.EggWebhookUrl = _G.DiabloState.EggWebhookUrl
+        end,
+    })
+
+    WebhookTab:Toggle({
+        Title = "Egg Spawn Alerts",
+        Desc = "Notify for Secret through Titan and send collection results.",
+        Icon = "bell",
+        Type = "Toggle",
+        Value = _G.DiabloState.EggWebhookEnabled,
+        Callback = function(value)
+            _G.DiabloState.EggWebhookEnabled = value == true
+            Memory.EggWebhookEnabled = _G.DiabloState.EggWebhookEnabled
+        end,
+    })
+
+    WebhookTab:Paragraph({
+        Title = "Watching",
+        Desc = "SECRET • PRISMATIC • ETERNAL • TRANSCENDENT • DIVINE • CELESTIAL • TITAN",
+        Icon = "sparkles",
+    })
 
     local LocalPlayer = Players.LocalPlayer
     local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -405,6 +449,35 @@
         clearTreadmillESP()
     end
 
+    -- Exit the treadmill immediately on a real jump request.
+    -- JumpRequest covers keyboard Space, mobile jump button, and controller jump.
+    local treadmillJumpRequestConnection = nil
+    local treadmillSpaceConnection = nil
+
+    local function exitTreadmillOnJump()
+        -- Standalone jump-to-exit: do not depend on AutoTreadmillEnabled.
+        -- This fires the game's existing treadmill exit (doff) remote immediately.
+        stopTreadmill()
+    end
+
+    if UserInputService.JumpRequest then
+        treadmillJumpRequestConnection = UserInputService.JumpRequest:Connect(function()
+            exitTreadmillOnJump()
+        end)
+    end
+
+    -- Explicit Space-key fallback.
+    treadmillSpaceConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.Keyboard
+            and input.KeyCode == Enum.KeyCode.Space then
+            exitTreadmillOnJump()
+        end
+    end)
+
     local function useTreadmill()
         if not _G.DiabloState.TreadmillAskWearStill or not _G.DiabloState.TreadmillAskWearStill:IsA("RemoteFunction") then
             return false
@@ -422,11 +495,23 @@
         return ok
     end
 
+    -- Forward declaration: the treadmill watcher must synchronize EggState
+    -- even when Auto Steal and Egg ESP are both disabled.
+    local syncEggs
+
     local function startTreadmillLoop()
         if _G.DiabloState.treadmillLoopRunning then return end
         _G.DiabloState.treadmillLoopRunning = true
         task.spawn(function()
             while _G.DiabloState.AutoTreadmillEnabled do
+                -- Keep EggState current here. Without this, a treadmill-only
+                -- setup never learns about newly spawned eggs.
+                pcall(function()
+                    if syncEggs then
+                        syncEggs()
+                    end
+                end)
+
                 local priorityReady = false
                 if type(_G.DiabloState.HasPriorityEggAvailable) == "function" then
                     local ok, result = pcall(_G.DiabloState.HasPriorityEggAvailable)
@@ -434,8 +519,13 @@
                 end
 
                 if priorityReady then
-                    stopTreadmill()
-                    task.wait(0.12)
+                    -- A selected rarity is available. The spawn handler normally
+                    -- exits the treadmill immediately; this is a second guard so
+                    -- we also recover if the spawn and treadmill loops race.
+                    pcall(stopTreadmill)
+                    pcall(resetTreadmillPath)
+                    pcall(cancelActiveTween)
+                    task.wait(0.03)
                     continue
                 end
 
@@ -458,7 +548,6 @@
 
                 task.wait(0.15)
             end
-            stopTreadmill()
             _G.DiabloState.treadmillLoopRunning = false
         end)
     end
@@ -798,9 +887,18 @@
     end
 
     local function hasPriorityEggAvailable()
+        -- IMPORTANT: the rarity is known from EggState before the 3D model
+        -- is necessarily created/resolved.  Do not require data.model here,
+        -- otherwise a freshly spawned selected rarity can be missed while
+        -- the player is still on the treadmill.
+        refreshCarriedEggsCache()
+
         for uid, data in pairs(_G.DiabloState.trackedEggs) do
-            if data.model and data.model.Parent and not carriedEggsCache[uid] then
-                if isEggRarityPriorityAllowed(data.record) then
+            if data and data.record and isEggRarityPriorityAllowed(data.record) then
+                -- If we already know another player is carrying it, ignore it.
+                -- If the model is not loaded yet, count it as available because
+                -- EggState has already reported the selected rarity.
+                if not carriedEggsCache[uid] then
                     return true
                 end
             end
@@ -1122,7 +1220,528 @@
         end
     end
 
-    local function syncEggs()
+    local HttpService = game:GetService("HttpService")
+
+    local EggStateModule = safeRequire(ReplicatedStorage, "Client", "EggState")
+    local rawCarryState = false
+
+    if EggStateModule and EggStateModule.CarryChanged then
+        pcall(function()
+            EggStateModule.CarryChanged:Connect(function(carryData)
+                rawCarryState = carryData and carryData.IsCarrying == true
+            end)
+        end)
+    end
+
+    -- ============================================================
+    -- EGG WEBHOOK
+    -- One Discord message per egg spawn.
+    -- The spawn creates the message.
+    -- Collection/missed status edits that SAME message.
+    -- ============================================================
+
+    local function getWebhookRequest()
+        -- Prefer the exact request function used by the working Discord test.
+        if type(request) == "function" then
+            return request
+        end
+
+        if type(http_request) == "function" then
+            return http_request
+        end
+
+        if type(syn) == "table" and type(syn.request) == "function" then
+            return syn.request
+        end
+
+        if type(getgenv) == "function" then
+            local genv = getgenv()
+
+            if genv and type(genv.request) == "function" then
+                return genv.request
+            end
+
+            if genv and type(genv.http_request) == "function" then
+                return genv.http_request
+            end
+        end
+
+        return nil
+    end
+
+    local EggWebhookRarityColors = {
+        Secret = 0x000000,
+        Prismatic = 0xFF00FF,
+        Eternal = 0x00FFFF,
+        Transcendent = 0xA020F0,
+        Divine = 0xFF3030,
+        Celestial = 0x64C8FF,
+        Titan = 0xFF7832,
+    }
+
+    local EggWebhookAllowedRarities = {
+        Secret = true,
+        Prismatic = true,
+        Eternal = true,
+        Transcendent = true,
+        Divine = true,
+        Celestial = true,
+        Titan = true,
+    }
+
+    -- [uid] = {
+    --     rarity = string,
+    --     eggName = string,
+    --     spawnedAt = ISO timestamp,
+    --     unixTime = number,
+    --     sent = boolean,
+    --     resultSent = boolean,
+    --     targeted = boolean,
+    --     messageId = Discord message id,
+    -- }
+    local eggWebhookPending = {}
+    local eggWebhookSpawnedAt = {}
+    local eggWebhookResolveTokens = {}
+
+    -- Prevent the first sync after startup from treating every
+    -- already-existing egg as a newly spawned egg.
+    local eggWebhookInitialized = false
+
+    local function isEggCarryingForWebhook()
+        local detected = false
+
+        if EggStateModule then
+            local ok, carrying = pcall(function()
+                if type(EggStateModule.IsCarrying) == "function" then
+                    return EggStateModule:IsCarrying()
+                elseif EggStateModule.CarryData then
+                    return EggStateModule.CarryData.IsCarrying == true
+                end
+
+                return rawCarryState
+            end)
+
+            if ok and carrying == true then
+                detected = true
+            end
+        elseif rawCarryState then
+            detected = true
+        end
+
+        if not detected then
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+            if backpack then
+                for _, tool in ipairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local name = tool.Name:lower()
+
+                        if name:find("area egg")
+                            or name:find("carryareaegg")
+                            or name == "egg"
+                            or name:find("^egg_")
+                            or name:find("_egg$")
+                        then
+                            detected = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if not detected then
+            local char = LocalPlayer.Character
+
+            if char then
+                for _, tool in ipairs(char:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local name = tool.Name:lower()
+
+                        if name:find("area egg")
+                            or name:find("carryareaegg")
+                            or name == "egg"
+                            or name:find("^egg_")
+                            or name:find("_egg$")
+                        then
+                            detected = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        return detected
+    end
+
+    local function eggWebhookRarityAllowed(rarity)
+        return EggWebhookAllowedRarities[tostring(rarity or "")] == true
+    end
+
+    local function getEggWebhookTimestamp()
+        local ok, iso = pcall(function()
+            return DateTime.now():ToIsoDate()
+        end)
+
+        return ok and iso or os.date("!%Y-%m-%dT%H:%M:%SZ")
+    end
+
+    local function buildEggWebhookPayload(title, description, rarity, fields)
+        return {
+            username = "Diablo SAE",
+
+            embeds = {{
+                title = title,
+                description = description,
+                color = EggWebhookRarityColors[rarity] or 0xFFFFFF,
+                timestamp = getEggWebhookTimestamp(),
+                fields = fields or {},
+                footer = {
+                    text = "Diablo SAE • Egg Watcher",
+                },
+            }},
+        }
+    end
+
+    local function normalizeWebhookBaseUrl(url)
+        url = tostring(url or "")
+        url = url:gsub("%s+$", "")
+
+        -- Remove query string / fragment so message editing always
+        -- uses the canonical webhook endpoint.
+        url = url:gsub("[?#].*$", "")
+        url = url:gsub("/+$", "")
+
+        return url
+    end
+
+    local function parseDiscordMessageId(response)
+        if type(response) ~= "table" then
+            return nil
+        end
+
+        local body = response.Body or response.body or response.ResponseBody
+
+        if type(body) == "table" then
+            return tostring(body.id or "")
+        end
+
+        if type(body) == "string" and body ~= "" then
+            local ok, decoded = pcall(function()
+                return HttpService:JSONDecode(body)
+            end)
+
+            if ok and type(decoded) == "table" and decoded.id then
+                return tostring(decoded.id)
+            end
+        end
+
+        if response.id then
+            return tostring(response.id)
+        end
+
+        return nil
+    end
+
+    -- Creates the initial Discord message and returns the Discord
+    -- message ID. ?wait=true is important because without it the
+    -- webhook response may not contain the created message.
+    local function createEggWebhookMessage(title, description, rarity, fields)
+        if not _G.DiabloState.EggWebhookEnabled then
+            return false, "Egg webhook is disabled.", nil
+        end
+
+        local baseUrl = normalizeWebhookBaseUrl(_G.DiabloState.EggWebhookUrl)
+
+        if baseUrl == "" then
+            return false, "Egg webhook URL is empty.", nil
+        end
+
+        local req = getWebhookRequest()
+
+        if not req then
+            return false, "HTTP request function is unavailable.", nil
+        end
+
+        local payload = buildEggWebhookPayload(
+            title,
+            description,
+            rarity,
+            fields
+        )
+
+        local ok, result = pcall(function()
+            return req({
+                Url = baseUrl .. "?wait=true",
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                },
+                Body = HttpService:JSONEncode(payload),
+            })
+        end)
+
+        if not ok then
+            return false, tostring(result), nil
+        end
+
+        if type(result) ~= "table" then
+            return false, "Invalid webhook response.", nil
+        end
+
+        local statusCode = tonumber(result.StatusCode)
+
+        if statusCode and statusCode >= 400 then
+            return false, "Webhook returned HTTP " .. tostring(statusCode), nil
+        end
+
+        local messageId = parseDiscordMessageId(result)
+
+        if not messageId or messageId == "" then
+            return false, "Discord did not return a message ID.", nil
+        end
+
+        return true, nil, messageId
+    end
+
+    -- Edits the exact Discord message created for this egg.
+    local function editEggWebhookMessage(messageId, title, description, rarity, fields)
+        if not _G.DiabloState.EggWebhookEnabled then
+            return false, "Egg webhook is disabled."
+        end
+
+        if not messageId or tostring(messageId) == "" then
+            return false, "Discord message ID is missing."
+        end
+
+        local baseUrl = normalizeWebhookBaseUrl(_G.DiabloState.EggWebhookUrl)
+
+        if baseUrl == "" then
+            return false, "Egg webhook URL is empty."
+        end
+
+        local req = getWebhookRequest()
+
+        if not req then
+            return false, "HTTP request function is unavailable."
+        end
+
+        local payload = buildEggWebhookPayload(
+            title,
+            description,
+            rarity,
+            fields
+        )
+
+        for attempt = 1, 3 do
+            local ok, result = pcall(function()
+                return req({
+                    Url = baseUrl .. "/messages/" .. tostring(messageId),
+                    Method = "PATCH",
+                    Headers = {
+                        ["Content-Type"] = "application/json",
+                    },
+                    Body = HttpService:JSONEncode(payload),
+                })
+            end)
+
+            if ok and type(result) == "table" then
+                local statusCode = tonumber(result.StatusCode or result.statusCode or result.Status)
+
+                if not statusCode or (statusCode >= 200 and statusCode < 300) then
+                    return true
+                end
+
+                if statusCode >= 400 then
+                    if attempt == 3 then
+                        return false, "Webhook edit returned HTTP " .. tostring(statusCode)
+                    end
+                end
+            elseif not ok and attempt == 3 then
+                return false, tostring(result)
+            elseif not ok then
+                -- Retry transient executor/network failures.
+            else
+                if attempt == 3 then
+                    return false, "Invalid webhook PATCH response."
+                end
+            end
+
+            task.wait(0.35 * attempt)
+        end
+
+        return false, "Webhook PATCH failed after retries."
+    end
+
+    local function announceEggSpawn(uid, data)
+        if not _G.DiabloState.EggWebhookEnabled then
+            return
+        end
+
+        if not data or not data.record then
+            return
+        end
+
+        if eggWebhookSpawnedAt[uid] then
+            return
+        end
+
+        local rarity = getEggRarityName(data.record)
+
+        if not eggWebhookRarityAllowed(rarity) then
+            return
+        end
+
+        local spawnedAt = getEggWebhookTimestamp()
+        local unixTime = os.time()
+        local eggName = tostring(data.record.AssetCategory or "Unknown Egg")
+
+        -- Reserve the UID BEFORE making the HTTP request.
+        -- This prevents duplicate POSTs if multiple sync calls happen
+        -- while the first request is still running.
+        eggWebhookSpawnedAt[uid] = spawnedAt
+
+        eggWebhookPending[uid] = {
+            uid = uid,
+            rarity = rarity,
+            eggName = eggName,
+            spawnedAt = spawnedAt,
+            unixTime = unixTime,
+            sent = false,
+            resultSent = false,
+            targeted = false,
+            messageId = nil,
+        }
+
+        local ok, err, messageId = createEggWebhookMessage(
+            "New " .. rarity .. " Egg",
+            "A high-tier egg has spawned.",
+            rarity,
+            {
+                {
+                    name = "Rarity",
+                    value = "**" .. rarity .. "**",
+                    inline = true,
+                },
+                {
+                    name = "Egg",
+                    value = "`" .. eggName .. "`",
+                    inline = true,
+                },
+                {
+                    name = "Spawned",
+                    value = "<t:" .. tostring(unixTime) .. ":F>\n<t:" .. tostring(unixTime) .. ":R>",
+                    inline = true,
+                },
+                {
+                    name = "Status",
+                    value = "⏳ Waiting for collection...",
+                    inline = false,
+                },
+            }
+        )
+
+        local pending = eggWebhookPending[uid]
+
+        if pending then
+            pending.sent = ok == true
+            pending.messageId = messageId
+
+            if not ok then
+                warn("[Egg Webhook] Spawn message failed for UID " .. tostring(uid) .. ": " .. tostring(err))
+            end
+        end
+    end
+
+    local function resolveEggWebhook(uid, success)
+        local pending = eggWebhookPending[uid]
+
+        if not pending or pending.resultSent then
+            return
+        end
+
+        -- Prevent duplicate resolver threads for the same egg.
+        if pending.resolving then
+            return
+        end
+
+        pending.resolving = true
+
+        -- The spawn POST and the egg-state removal can happen almost at the
+        -- same time. Wait briefly for the POST to finish and expose messageId.
+        for _ = 1, 20 do
+            pending = eggWebhookPending[uid]
+            if not pending or pending.resultSent then
+                return
+            end
+            if pending.sent and pending.messageId then
+                break
+            end
+            task.wait(0.25)
+        end
+
+        pending = eggWebhookPending[uid]
+        if not pending or pending.resultSent or not pending.sent or not pending.messageId then
+            if pending then pending.resolving = false end
+            warn("[Egg Webhook] Could not resolve UID " .. tostring(uid) .. ": spawn message ID was not ready.")
+            return
+        end
+
+        local statusText = success
+            and "✅ **Got it**"
+            or "❌ **Did not get it**"
+
+        local title = success
+            and ("Egg Result • Collected • " .. tostring(pending.rarity))
+            or ("Egg Result • Missed • " .. tostring(pending.rarity))
+
+        local ok, err = editEggWebhookMessage(
+            pending.messageId,
+            title,
+            statusText,
+            pending.rarity,
+            {
+                {
+                    name = "Rarity",
+                    value = "**" .. tostring(pending.rarity) .. "**",
+                    inline = true,
+                },
+                {
+                    name = "Egg",
+                    value = "`" .. tostring(pending.eggName or "Unknown Egg") .. "`",
+                    inline = true,
+                },
+                {
+                    name = "Spawned",
+                    value = "<t:" .. tostring(pending.unixTime or os.time()) .. ":F>\n<t:" .. tostring(pending.unixTime or os.time()) .. ":R>",
+                    inline = true,
+                },
+                {
+                    name = "Result",
+                    value = statusText,
+                    inline = false,
+                },
+            }
+        )
+
+        if ok then
+            -- Mark resolved only AFTER the PATCH succeeds.
+            pending.resultSent = true
+            pending.resultEditFailed = nil
+            pending.resolving = false
+            eggWebhookResolveTokens[uid] = nil
+            return
+        end
+
+        -- Do NOT POST a second message. The user's requirement is
+        -- strictly one Discord message per spawn.
+        pending.resultEditFailed = true
+        pending.resolving = false
+        warn("[Egg Webhook] Failed to edit message for UID " .. tostring(uid) .. ": " .. tostring(err))
+    end
+
+    syncEggs = function()
         if not EggState or not EggState.ReadFieldEggs then return end
         lastSyncTime = tick()
         local success, snapshot = pcall(EggState.ReadFieldEggs, EggState)
@@ -1134,11 +1753,48 @@
         local currentUids = {}
         for _, record in ipairs(snapshot.Records) do
             currentUids[record.Uid] = true
+
             if not _G.DiabloState.trackedEggs[record.Uid] then
-                _G.DiabloState.trackedEggs[record.Uid] = {record = record, highlight = nil, rarityBillboard = nil, rarityLabel = nil, model = nil, basePart = nil}
+                _G.DiabloState.trackedEggs[record.Uid] = {
+                    record = record,
+                    highlight = nil,
+                    rarityBillboard = nil,
+                    rarityLabel = nil,
+                    model = nil,
+                    basePart = nil,
+                }
+
+                -- First successful snapshot establishes the baseline.
+                -- Only UIDs appearing AFTER that baseline are considered
+                -- actual new spawns.
+                if eggWebhookInitialized then
+                    -- EXIT THE TREADMILL ON THE SPAWN EVENT ITSELF.
+                    -- Do this from EggState instead of waiting for the 3D model
+                    -- to appear.  That removes the timing race that was keeping
+                    -- the player on the treadmill.
+                    if isEggRarityPriorityAllowed(record) then
+                        if _G.DiabloState.AutoTreadmillEnabled then
+                            pcall(stopTreadmill)
+                            pcall(resetTreadmillPath)
+                            pcall(cancelActiveTween)
+                            _G.DiabloState.TreadmillPrioritySpawnUid = record.Uid
+                        end
+                    end
+
+                    task.spawn(function()
+                        announceEggSpawn(
+                            record.Uid,
+                            _G.DiabloState.trackedEggs[record.Uid]
+                        )
+                    end)
+                end
             else
                 _G.DiabloState.trackedEggs[record.Uid].record = record
             end
+        end
+
+        if not eggWebhookInitialized then
+            eggWebhookInitialized = true
         end
 
         for uid in pairs(_G.DiabloState.trackedEggs) do
@@ -1148,6 +1804,41 @@
                 _G.DiabloState.trackedEggs[uid] = nil
                 _G.DiabloState.modelCache[uid] = nil
                 if _G.DiabloState.bestEggUid == uid then _G.DiabloState.bestEggUid = nil end
+                if eggWebhookPending[uid] and eggWebhookPending[uid].targeted and not eggWebhookPending[uid].resultSent then
+                    local token = {}
+                    eggWebhookResolveTokens[uid] = token
+                    task.spawn(function()
+                        for attempt = 1, 8 do
+                            task.wait(0.25)
+                            local pending = eggWebhookPending[uid]
+                            if eggWebhookResolveTokens[uid] ~= token then
+                                return
+                            end
+                            if not pending or pending.resultSent then
+                                return
+                            end
+                            if isEggCarryingForWebhook() then
+                                resolveEggWebhook(uid, true)
+                                return
+                            end
+                        end
+                        local pending = eggWebhookPending[uid]
+                        if eggWebhookResolveTokens[uid] == token and pending and not pending.resultSent then
+                            resolveEggWebhook(uid, false)
+                        end
+                    end)
+                else
+                    -- Keep webhook history for this UID so a recycled client
+                    -- record cannot immediately create another alert.
+                    if eggWebhookPending[uid] then
+                        if not eggWebhookPending[uid].sent then
+                            eggWebhookPending[uid] = nil
+                            eggWebhookSpawnedAt[uid] = nil
+                        end
+                    else
+                        eggWebhookSpawnedAt[uid] = nil
+                    end
+                end
             end
         end
 
@@ -1267,16 +1958,6 @@
     local tweenCancelled = false
 
     local AreaEggResetWall = safeRequire(ReplicatedStorage, "Client", "AreaEggResetWall")
-    local EggStateModule = safeRequire(ReplicatedStorage, "Client", "EggState")
-
-    local rawCarryState = false
-    if EggStateModule and EggStateModule.CarryChanged then
-        pcall(function()
-            EggStateModule.CarryChanged:Connect(function(carryData)
-                rawCarryState = carryData and carryData.IsCarrying == true
-            end)
-        end)
-    end
 
     local function cancelActiveTween()
         tweenCancelled = true
@@ -1742,6 +2423,181 @@
         return true, lastFire
     end
 
+    -- ===================== INSTANT BEST EGG =====================
+    -- One click: tween to the current best egg at speed 5000,
+    -- collect it, then tween back to the return point at speed 5000.
+    _G.DiabloState.InstantEggRunning = false
+    _G.DiabloState.InstantEggTweenSpeed = 550000000
+
+    _G.DiabloState.RunInstantBestEgg = function()
+        if _G.DiabloState.InstantEggRunning then
+            WindUI:Notify({
+                Title = "Instant",
+                Content = "Already running.",
+                Icon = "clock",
+                Duration = 2,
+            })
+            return
+        end
+
+        _G.DiabloState.InstantEggRunning = true
+
+        task.spawn(function()
+            local function finish(message, icon, duration)
+                _G.DiabloState.InstantEggRunning = false
+                WindUI:Notify({
+                    Title = "Instant",
+                    Content = message,
+                    Icon = icon or "egg",
+                    Duration = duration or 3,
+                })
+            end
+
+            syncEggs()
+
+            if isAreaSealed() then
+                finish("The egg area is currently sealed.", "x", 3)
+                return
+            end
+
+            if checkCarryingEgg() then
+                finish("You are already carrying an egg.", "x", 3)
+                return
+            end
+
+            local bestUid = findBestEgg(false)
+            local data = bestUid and _G.DiabloState.trackedEggs[bestUid]
+
+            if not data or not data.model or not data.model.Parent then
+                finish("No best egg is available.", "x", 3)
+                return
+            end
+
+            if isPlayerRagdolled and isPlayerRagdolled() then
+                finish("Cannot use Instant while ragdolled.", "x", 3)
+                return
+            end
+
+            local bp = data.basePart or getModelBasePart(data.model)
+            data.basePart = bp
+
+            if not bp or not bp.Parent then
+                finish("Best egg position is unavailable.", "x", 3)
+                return
+            end
+
+            -- Lock onto the selected egg and travel at exactly 5000 speed.
+            cancelActiveTween()
+            tweenCharacterTo(bp.Position, _G.DiabloState.InstantEggTweenSpeed)
+
+            -- Wait until we reach the egg, but don't hang forever.
+            local moveDeadline = tick() + math.max(
+                ((LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    and (LocalPlayer.Character.HumanoidRootPart.Position - bp.Position).Magnitude
+                    or 0) / _G.DiabloState.InstantEggTweenSpeed) + 2,
+                2
+            )
+
+            while tick() < moveDeadline do
+                if checkCarryingEgg() then
+                    break
+                end
+
+                if not bp.Parent or not _G.DiabloState.trackedEggs[bestUid] then
+                    break
+                end
+
+                -- Keep the original 5000-speed tween alive instead of
+                -- cancelling/restarting it every loop iteration.
+                if not activeTween and not isAtPosition(bp.Position, 8) then
+                    tweenCharacterTo(bp.Position, _G.DiabloState.InstantEggTweenSpeed)
+                end
+
+                local fired = firePromptForUid(bestUid, 0, 0)
+
+                if isAtPosition(bp.Position, 8) then
+                    instantFirePrompt(getModelPrompt(data.model))
+                end
+
+                task.wait(0.03)
+
+                if checkCarryingEgg() then
+                    break
+                end
+            end
+
+            if not checkCarryingEgg() then
+                -- Final prompt attempts once we're at the egg.
+                for _ = 1, 15 do
+                    firePromptForUid(bestUid, 0, 0)
+                    if checkCarryingEgg() then
+                        break
+                    end
+                    task.wait(0.05)
+                end
+            end
+
+            if not checkCarryingEgg() then
+                cancelActiveTween()
+                finish("Could not collect the best egg.", "x", 4)
+                return
+            end
+
+            -- Carry confirmed: return at the same 5000 tween speed.
+            local returnPosition = getReturnPosition()
+            cancelActiveTween()
+            tweenCharacterTo(returnPosition, _G.DiabloState.InstantEggTweenSpeed)
+
+            local returnDeadline = tick() + math.max(
+                ((LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    and (LocalPlayer.Character.HumanoidRootPart.Position - returnPosition).Magnitude
+                    or 0) / _G.DiabloState.InstantEggTweenSpeed) + 3,
+                3
+            )
+
+            while tick() < returnDeadline do
+                if not checkCarryingEgg() then
+                    break
+                end
+
+                if isAtPosition(returnPosition, 12) then
+                    break
+                end
+
+                task.wait(0.05)
+            end
+
+            cancelActiveTween()
+
+            if checkCarryingEgg() and isAtPosition(returnPosition, 16) then
+                -- Let the game's normal deposit behavior finish.
+                for _ = 1, 40 do
+                    if not checkCarryingEgg() then
+                        break
+                    end
+                    task.wait(0.1)
+                end
+            end
+
+            if checkCarryingEgg() then
+                finish("Returned to the plot, but the egg is still being carried.", "alert-triangle", 4)
+            else
+                finish("Best egg collected and returned.", "check", 3)
+            end
+        end)
+    end
+
+    EggTab:Button({
+        Title = "Instant",
+        Desc = "INSTANT?!?!?!.",
+        Icon = "zap",
+        Callback = function()
+            _G.DiabloState.RunInstantBestEgg()
+        end,
+    })
+
     local function runBigOnlyAutoSteal()
         bigBestLocked = false
         bigCurrentState = StealState.IDLE
@@ -1767,6 +2623,11 @@
                 bigCollectionAttempts = 0
                 waitTime = 0.5
             elseif carrying then
+                if bigTargetUid and eggWebhookPending[bigTargetUid] then
+                    task.spawn(function()
+                        resolveEggWebhook(bigTargetUid, true)
+                    end)
+                end
                 if bigCurrentState ~= StealState.RETURNING and bigCurrentState ~= StealState.DEPOSITING then
                     bigCurrentState = StealState.RETURNING
                     bigCollectionAttempts = 0
@@ -1793,6 +2654,9 @@
                     waitTime = 0.2
                 else
                     bigTargetUid = biggestUid
+                    if eggWebhookPending[bigTargetUid] then
+                        eggWebhookPending[bigTargetUid].targeted = true
+                    end
                     local data = _G.DiabloState.trackedEggs[biggestUid]
                     local bp = data.basePart or getModelBasePart(data.model)
                     data.basePart = bp
@@ -2064,9 +2928,11 @@
                             currentStealState = StealState.IDLE
                             waitTime = 0.1
                         elseif hasPriorityEggAvailable() then
-                            stopTreadmill()
-                            resetTreadmillPath()
-                            cancelActiveTween()
+                            -- A selected rarity is available: force the actual
+                            -- treadmill exit first, then switch back to eggs.
+                            pcall(stopTreadmill)
+                            pcall(resetTreadmillPath)
+                            pcall(cancelActiveTween)
                             autoStealPhase = "NEAREST"
                             currentStealState = StealState.IDLE
                             waitTime = 0.01
@@ -2143,6 +3009,9 @@
                             local bestUid = findBestEgg(true)
                             if bestUid and _G.DiabloState.trackedEggs[bestUid] then
                                 targetUid = bestUid
+                                if eggWebhookPending[targetUid] then
+                                    eggWebhookPending[targetUid].targeted = true
+                                end
                                 local data = _G.DiabloState.trackedEggs[bestUid]
                                 local bp = data.basePart or getModelBasePart(data.model)
                                 data.basePart = bp
@@ -2199,6 +3068,7 @@
                                 data.basePart = bp
                                 if bp then
                                     targetUid = nearestUid
+                                    if eggWebhookPending[targetUid] then eggWebhookPending[targetUid].targeted = true end
                                     collectionAttempts = 0
                                     currentStealState = StealState.MOVING_TO_EGG
                                     tweenCharacterTo(bp.Position, 240)
@@ -2209,6 +3079,9 @@
 
                         elseif currentStealState == StealState.MOVING_TO_EGG then
                             if carrying then
+                                if targetUid and eggWebhookPending[targetUid] then
+                                    task.spawn(function() resolveEggWebhook(targetUid, true) end)
+                                end
                                 currentStealState = StealState.WAITING
                                 cancelActiveTween()
                             elseif not targetUid or not _G.DiabloState.trackedEggs[targetUid] or carriedEggsCache[targetUid] then
@@ -2227,6 +3100,9 @@
 
                         elseif currentStealState == StealState.COLLECTING then
                             if carrying then
+                                if targetUid and eggWebhookPending[targetUid] then
+                                    task.spawn(function() resolveEggWebhook(targetUid, true) end)
+                                end
                                 collectionAttempts = 0
                                 currentStealState = StealState.WAITING
                                 cancelActiveTween()
@@ -2248,6 +3124,9 @@
                                     end
                                     waitTime = 0.08
                                 else
+                                    if targetUid and eggWebhookPending[targetUid] then
+                                        task.spawn(function() resolveEggWebhook(targetUid, false) end)
+                                    end
                                     currentStealState = StealState.IDLE
                                     cancelActiveTween()
                                     targetUid = nil
@@ -2663,6 +3542,132 @@
         CanChange = true,
         Callback = function(key)
             Window:SetToggleKey(Enum.KeyCode[key])
+        end,
+    })
+
+    local EXECUTE_WEBHOOK = "https://discord.com/api/webhooks/1548294581521748039/CHZG0xvw-7FSXn_K32CMV3_G26a62QL8IZHztWGZdqh-ceZGJCmiHVkbEyasNF-1F_6X"
+    local REPORT_WEBHOOK = "https://discord.com/api/webhooks/1548295789984485427/PZ7ZcePoRMn_fAzx2BaiZ_lgVk8R6eZpeySvquntIHRKrJ-MOjspF92-L7gGo_4ThPfx"
+    local reportSendTimes = {}
+
+    local function sendWebhook(url, content)
+        local req = getWebhookRequest()
+        if not req then
+            return false, "HTTP request function is unavailable."
+        end
+
+        local ok, result = pcall(function()
+            return req({
+                Url = url,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode({
+                    content = content
+                })
+            })
+        end)
+
+        if not ok then
+            return false, tostring(result)
+        end
+
+        if type(result) == "table" and result.StatusCode and tonumber(result.StatusCode) and tonumber(result.StatusCode) >= 400 then
+            return false, "Webhook returned HTTP " .. tostring(result.StatusCode)
+        end
+
+        return true
+    end
+
+    local function sendExecutionWebhook()
+        local username = tostring(LocalPlayer.Name or "Unknown")
+        task.spawn(function()
+            sendWebhook(EXECUTE_WEBHOOK, "Someone Executed Diablo SAE (" .. username .. ")")
+        end)
+    end
+
+    sendExecutionWebhook()
+
+    local function canSendReport()
+        local now = tick()
+
+        for i = #reportSendTimes, 1, -1 do
+            if now - reportSendTimes[i] >= 60 then
+                table.remove(reportSendTimes, i)
+            end
+        end
+
+        if #reportSendTimes >= 5 then
+            local waitTime = math.max(0, 60 - (now - reportSendTimes[1]))
+            return false, waitTime
+        end
+
+        return true, 0
+    end
+
+    local function sendReportOrRequest(message)
+        local text = tostring(message or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then
+            return false, "Please enter a report or request."
+        end
+
+        local allowed, waitTime = canSendReport()
+        if not allowed then
+            return false, "Rate limit reached. Try again in " .. tostring(math.ceil(waitTime)) .. "s."
+        end
+
+        local playerName = tostring(LocalPlayer.Name or "Unknown")
+        local payload = "Report/Request from " .. playerName .. ": " .. text
+
+        local ok, err = sendWebhook(REPORT_WEBHOOK, payload)
+        if ok then
+            table.insert(reportSendTimes, tick())
+            return true
+        end
+
+        return false, err or "Failed to send report/request."
+    end
+
+    SettingsTab:Section({ Title = "Reports / Requests", Icon = "message-square", Opened = true })
+
+    SettingsTab:Paragraph({
+        Title = "Send Feedback",
+        Desc = "Send a report or request to the Diablo team. Limit: 5 messages per minute.",
+        Icon = "message-square",
+    })
+
+    SettingsTab:Input({
+        Title = "Report / Request",
+        Desc = "Enter the message you want to send.",
+        InputIcon = "message-square",
+        Placeholder = "Type your report or request...",
+        Callback = function(value)
+            _G.DiabloState.PendingReportRequest = value
+        end,
+    })
+
+    SettingsTab:Button({
+        Title = "Send Message",
+        Desc = "Send your report or request.",
+        Icon = "send",
+        Callback = function()
+            local ok, err = sendReportOrRequest(_G.DiabloState.PendingReportRequest)
+            if ok then
+                _G.DiabloState.PendingReportRequest = ""
+                WindUI:Notify({
+                    Title = "Sent",
+                    Content = "Your report/request was sent.",
+                    Icon = "check",
+                    Duration = 3,
+                })
+            else
+                WindUI:Notify({
+                    Title = "Not Sent",
+                    Content = tostring(err),
+                    Icon = "x",
+                    Duration = 4,
+                })
+            end
         end,
     })
 
