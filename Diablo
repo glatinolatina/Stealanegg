@@ -175,8 +175,8 @@
             SpeedEnabled = true,
             DesiredSpeed = 500,
             SpeedBypassMethod = "Humanoid Clone",
-            AntiKnockbackEnabled = false,
-            AntiRagdollEnabled = false,
+            AntiKnockbackEnabled = true,
+            AntiRagdollEnabled = true,
             InstantAccelerationEnabled = false,
             AntiRejoinEnabled = false,
             FlyEnabled = false,
@@ -202,8 +202,8 @@
     _G.DiabloState.DesiredSpeed = Memory.DesiredSpeed or 500
     _G.DiabloState.SpeedEnabled = Memory.SpeedEnabled or false
     _G.DiabloState.SpeedBypassMethod = Memory.SpeedBypassMethod or "Humanoid Clone"
-    _G.DiabloState.AntiKnockbackEnabled = Memory.AntiKnockbackEnabled or false
-    _G.DiabloState.AntiRagdollEnabled = Memory.AntiRagdollEnabled or false
+    _G.DiabloState.AntiKnockbackEnabled = Memory.AntiKnockbackEnabled ~= false
+    _G.DiabloState.AntiRagdollEnabled = Memory.AntiRagdollEnabled ~= false
     _G.DiabloState.InstantAccelerationEnabled = Memory.InstantAccelerationEnabled or false
     _G.DiabloState.AntiRejoinEnabled = Memory.AntiRejoinEnabled or false
     _G.DiabloState.FlyEnabled = Memory.FlyEnabled or false
@@ -2592,6 +2592,7 @@
     EggTab:Button({
         Title = "Instant",
         Desc = "INSTANT?!?!?!.",
+        Locked = true,
         Icon = "zap",
         Callback = function()
             _G.DiabloState.RunInstantBestEgg()
