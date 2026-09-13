@@ -331,7 +331,7 @@
 
     WebhookTab:Paragraph({
         Title = "How Egg Watcher Works",
-        Desc = "Tracks newly spawned eggs and ignores Common through Cosmic. Only Secret, Prismatic, Eternal, Transcendent, Divine, Celestial, and Titan are sent to your Discord webhook. Every alert uses a modern Discord embed with a unique rarity accent; Secret uses black. When Diablo targets the tracked egg, the webhook follows up with whether it was collected or missed, while keeping the original spawn time.",
+        Desc = "Tracks newly spawned eggs and ignores Common through Cosmic. Only Secret, Prismatic, Eternal, Transcendent, Divine, Celestial, and Titan are sent to your Discord webhook.",
         Icon = "info",
     })
 
