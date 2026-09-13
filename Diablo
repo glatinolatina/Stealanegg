@@ -2708,6 +2708,7 @@
     local EggBigOnlyToggle = EggTab:Toggle({
         Title = "Big Eggs Only",
         Desc = "Steals the biggiest balls in the current eggs.",
+        Locked = true,
         Icon = "maximize",
         Type = "Toggle",
         Value = _G.DiabloState.eggBigOnly,
